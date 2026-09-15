@@ -3,8 +3,9 @@
   <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
 
   <PropertyGroup>
-    <!-- Test method names use xunit's sentence_style_with_underscores convention -->
-    <NoWarn>$(NoWarn);CA1707</NoWarn>
+    <!-- CA1707: test method names use xunit's sentence_style_with_underscores convention.
+         CA1001: fixture lifetime is managed by xunit's IAsyncLifetime, not IDisposable. -->
+    <NoWarn>$(NoWarn);CA1707;CA1001</NoWarn>
   </PropertyGroup>
 
 </Project>

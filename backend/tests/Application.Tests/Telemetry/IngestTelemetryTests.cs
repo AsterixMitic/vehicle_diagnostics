@@ -116,6 +116,10 @@ public sealed class IngestTelemetryTests
 
             return Task.FromResult(NextResult);
         }
+
+        public Task<IReadOnlyList<StoredReading>> QueryAsync(
+            DeviceId deviceId, DateTimeOffset fromInclusive, DateTimeOffset toExclusive, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<StoredReading>>([]);
     }
 
     private sealed class FakePublisher : IDomainEventPublisher
