@@ -1,0 +1,8 @@
+{
+  "sdk": {
+    "version": "10.0.401",
+    "rollForward": "latestFeature",
+    "paths": ["../.dotnet", "$host$"],
+    "errorMessage": "Required .NET 10 SDK not found. Install it locally: curl -fsSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 10.0 --quality ga --install-dir .dotnet (from the repo root)."
+  }
+}
