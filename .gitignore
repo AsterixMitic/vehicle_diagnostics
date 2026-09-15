@@ -1,0 +1,25 @@
+# Build outputs
+bin/
+obj/
+artifacts/
+TestResults/
+*.binlog
+
+# IDE state
+.vs/
+.idea/
+*.user
+*.suo
+
+# Local tooling
+.dotnet/
+*.lock.json
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Secrets — never committed
+*.pfx
+*.key
+appsettings.*.Local.json
