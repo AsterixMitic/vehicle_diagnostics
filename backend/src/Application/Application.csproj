@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Application references Domain only. Enforced by Architecture.Tests. -->
+  <ItemGroup>
+    <ProjectReference Include="../Domain/Domain.csproj" />
+  </ItemGroup>
+
+</Project>

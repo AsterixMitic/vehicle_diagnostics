@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Versioned message contracts. Pure DTOs + validation; no project or I/O dependencies. -->
+
+</Project>

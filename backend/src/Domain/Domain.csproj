@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Domain references nothing: no projects, no packages, no I/O. Enforced by Architecture.Tests. -->
+
+</Project>
