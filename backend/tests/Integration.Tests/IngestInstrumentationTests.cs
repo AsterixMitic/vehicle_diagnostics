@@ -136,9 +136,11 @@ public sealed class IngestInstrumentationTests : IAsyncLifetime
             .Build();
 
         // Mixed batch: one valid, one malformed, one redelivery of the valid message.
-        await publisher.PublishAsync(Message(Envelope(1)), CancellationToken.None);
+        // A redelivery is byte-identical — the same envelope, not a rebuilt one.
+        byte[] validEnvelope = Envelope(1);
+        await publisher.PublishAsync(Message(validEnvelope), CancellationToken.None);
         await publisher.PublishAsync(Message(Encoding.UTF8.GetBytes("not an envelope")), CancellationToken.None);
-        await publisher.PublishAsync(Message(Envelope(1)), CancellationToken.None);
+        await publisher.PublishAsync(Message(validEnvelope), CancellationToken.None);
 
         // The mixed batch is fully processed once all three received messages are accounted
         // for in outcome counters: 1 persisted + 1 rejected + 1 deduplicated.
