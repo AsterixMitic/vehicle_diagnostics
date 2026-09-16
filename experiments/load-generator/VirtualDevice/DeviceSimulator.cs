@@ -10,7 +10,8 @@ namespace VehicleDiagnostics.VirtualDevice;
 /// coolant temperature rises asymptotically — the same shape the future sim-ECU produces),
 /// published with a monotonic sequence and a fresh W3C traceparent per message.
 /// </summary>
-public sealed class DeviceSimulator(string host, int port, string vehicleId, string deviceId, double rateHz)
+public sealed class DeviceSimulator(
+    string host, int port, string vehicleId, string deviceId, double rateHz, string? heartbeatFile)
 {
     private long _sequence;
     private double _rpm = 800;
@@ -55,6 +56,7 @@ public sealed class DeviceSimulator(string host, int port, string vehicleId, str
                             .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
                             .Build();
                         await client.PublishAsync(message, cancellationToken).ConfigureAwait(false);
+                        Heartbeat();
                     }
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
@@ -72,6 +74,20 @@ public sealed class DeviceSimulator(string host, int port, string vehicleId, str
         {
             Console.WriteLine($"[{deviceId}] stopped after {_sequence} messages");
         }
+    }
+
+    /// <summary>
+    /// Liveness signal for container health checks: the file's modification time is the
+    /// moment of the last successful publish. Disabled when no path is configured.
+    /// </summary>
+    private void Heartbeat()
+    {
+        if (heartbeatFile is null)
+        {
+            return;
+        }
+
+        File.WriteAllText(heartbeatFile, _sequence.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
     private void Advance(double elapsedSeconds, double dtSeconds)

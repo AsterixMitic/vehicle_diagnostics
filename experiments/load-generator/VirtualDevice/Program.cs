@@ -6,8 +6,10 @@ using VehicleDiagnostics.VirtualDevice;
 // Configuration via environment variables:
 //   MQTT_HOST (localhost) · MQTT_PORT (1883) · VEHICLE_ID (car-01)
 //   DEVICE_ID_PREFIX (esp32) · RATE_HZ (1) · DEVICE_COUNT (1)
+//   HEARTBEAT_FILE (unset) — when set, touched after every publish, for container health checks
 
 string host = Environment.GetEnvironmentVariable("MQTT_HOST") ?? "localhost";
+string? heartbeatFile = Environment.GetEnvironmentVariable("HEARTBEAT_FILE");
 int port = int.TryParse(Environment.GetEnvironmentVariable("MQTT_PORT"), out int p) ? p : 1883;
 string vehicleId = Environment.GetEnvironmentVariable("VEHICLE_ID") ?? "car-01";
 string devicePrefix = Environment.GetEnvironmentVariable("DEVICE_ID_PREFIX") ?? "esp32";
@@ -25,7 +27,7 @@ Console.WriteLine(
     $"Virtual device(s) → mqtt://{host}:{port}  vehicle={vehicleId}  devices={deviceCount}  rate={rateHz} Hz. Ctrl+C stops.");
 
 Task[] devices = [.. Enumerable.Range(1, deviceCount)
-    .Select(i => new DeviceSimulator(host, port, vehicleId, $"{devicePrefix}-{i:D2}", rateHz)
+    .Select(i => new DeviceSimulator(host, port, vehicleId, $"{devicePrefix}-{i:D2}", rateHz, heartbeatFile)
         .RunAsync(shutdown.Token))];
 
 await Task.WhenAll(devices);

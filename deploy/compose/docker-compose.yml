@@ -39,16 +39,23 @@ services:
       retries: 12
 
   aspire-dashboard:
-    # OTLP receiver + trace/metric/log UI; no storage to manage.
-    # The image is distroless (no shell, no probe binary), so it cannot self-report health;
-    # its availability is verified externally: curl http://localhost:18888/ from the host.
-    # The host's OTLP exporter buffers and retries, so the dashboard is not a startup gate.
-    image: mcr.microsoft.com/dotnet/aspire-dashboard:13.5.2
+    # OTLP receiver + trace/metric/log UI; no storage to manage. Built from a one-line
+    # derived image that adds a static busybox so the distroless base can probe itself.
+    # The host's OTLP exporter buffers and retries, so the dashboard never gates ingestion.
+    build:
+      context: ./aspire-dashboard
     environment:
       DOTNET_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS: "true"
     ports:
       - "127.0.0.1:18888:18888"   # UI
       - "127.0.0.1:18889:18889"   # OTLP gRPC, for hosts running outside compose
+    healthcheck:
+      # Follows the UI redirect and requires a 200.
+      test: ["CMD", "/bin/busybox", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:18888/"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   api:
     build:
@@ -76,7 +83,9 @@ services:
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /health HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -qx Healthy <&3"]
       interval: 5s
       timeout: 5s
-      retries: 12
+      # start_period already covers startup, so three consecutive failures (~15 s) is
+      # enough to flag a lost dependency without false alarms.
+      retries: 3
       start_period: 20s
 
   virtual-device:
@@ -91,9 +100,18 @@ services:
       DEVICE_ID_PREFIX: esp32
       RATE_HZ: "1"
       DEVICE_COUNT: "1"
+      HEARTBEAT_FILE: /tmp/heartbeat
     depends_on:
       api:
         condition: service_healthy
+    healthcheck:
+      # The device touches the heartbeat file after every successful publish; healthy means
+      # it published within the last 30 s, i.e. it is connected and actually sending.
+      test: ["CMD", "bash", "-c", "find /tmp/heartbeat -mmin -0.5 | grep -q ."]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
 volumes:
   telemetry-data:
