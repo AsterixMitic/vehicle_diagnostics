@@ -7,6 +7,12 @@
   <ItemGroup Label="Aspire">
     <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.5.4" />
     <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.5.4" />
+    <PackageVersion Include="Aspire.Hosting.RabbitMQ" Version="13.5.4" />
+  </ItemGroup>
+
+  <ItemGroup Label="Messaging (ADR-0004: 8.x is the Apache-2.0 line; 9.x is commercial)">
+    <PackageVersion Include="MassTransit" Version="8.5.10" />
+    <PackageVersion Include="MassTransit.RabbitMQ" Version="8.5.10" />
   </ItemGroup>
 
   <ItemGroup Label="ServiceDefaults">
@@ -35,6 +41,7 @@
     <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.10.0" />
     <PackageVersion Include="Testcontainers" Version="4.15.0" />
     <PackageVersion Include="Testcontainers.PostgreSql" Version="4.15.0" />
+    <PackageVersion Include="Testcontainers.RabbitMq" Version="4.15.0" />
   </ItemGroup>
 
 </Project>

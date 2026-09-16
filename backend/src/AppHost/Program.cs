@@ -5,6 +5,11 @@ IResourceBuilder<PostgresServerResource> postgres = builder
     .WithImage("timescale/timescaledb", "latest-pg17");
 IResourceBuilder<PostgresDatabaseResource> telemetryDb = postgres.AddDatabase("telemetrydb");
 
+// Internal bus between bounded contexts (ADR-0004).
+IResourceBuilder<RabbitMQServerResource> rabbitmq = builder
+    .AddRabbitMQ("rabbitmq")
+    .WithManagementPlugin();
+
 // Host port 1883 is pinned so the virtual device's defaults work without configuration.
 IResourceBuilder<ContainerResource> mosquitto = builder
     .AddContainer("mosquitto", "eclipse-mosquitto", "2")
@@ -14,6 +19,8 @@ IResourceBuilder<ContainerResource> mosquitto = builder
 builder.AddProject<Projects.Api>("api")
     .WithReference(telemetryDb)
     .WaitFor(telemetryDb)
+    .WithReference(rabbitmq)
+    .WaitFor(rabbitmq)
     .WaitFor(mosquitto)
     .WithEnvironment(context =>
     {

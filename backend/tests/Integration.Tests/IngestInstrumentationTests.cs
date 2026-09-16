@@ -2,18 +2,11 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Text;
-using DotNet.Testcontainers.Builders;
-using DotNet.Testcontainers.Containers;
 using FluentAssertions;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using MQTTnet;
-using MQTTnet.Protocol;
 using VehicleDiagnostics.Contracts;
-using VehicleDiagnostics.Infrastructure;
 using VehicleDiagnostics.Infrastructure.Observability;
-using VehicleDiagnostics.Infrastructure.Telemetry;
 using Xunit;
 
 namespace VehicleDiagnostics.Integration.Tests;
@@ -22,17 +15,10 @@ namespace VehicleDiagnostics.Integration.Tests;
 /// The instrumentation IS the thesis's measuring instrument: spans must continue the
 /// device's trace, and the outcome counters must add up over a mixed batch.
 /// </summary>
-public sealed class IngestInstrumentationTests : IAsyncLifetime
+[Collection(StackCollectionDefinition.Name)]
+public sealed class IngestInstrumentationTests(StackFixture stack) : IAsyncLifetime
 {
     private const string DeviceTraceId = "0af7651916cd43dd8448eb211c80319c";
-
-    private readonly TimescaleDbFixture _db = new();
-
-    private readonly IContainer _mosquitto = new ContainerBuilder("eclipse-mosquitto:2")
-        .WithResourceMapping(Encoding.UTF8.GetBytes("listener 1883\nallow_anonymous true\n"), "/mosquitto/config/mosquitto.conf")
-        .WithPortBinding(1883, assignRandomHostPort: true)
-        .WithWaitStrategy(Wait.ForUnixContainer().UntilInternalTcpPortIsAvailable(1883))
-        .Build();
 
     private readonly ConcurrentBag<Activity> _activities = [];
     private readonly ConcurrentDictionary<string, long> _counters = new();
@@ -64,25 +50,7 @@ public sealed class IngestInstrumentationTests : IAsyncLifetime
             _counters.AddOrUpdate(instrument.Name, measurement, (_, sum) => sum + measurement));
         _meterListener.Start();
 
-        await Task.WhenAll(_db.InitializeAsync(), _mosquitto.StartAsync());
-
-        HostApplicationBuilder builder = Host.CreateApplicationBuilder();
-        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            [$"ConnectionStrings:{DependencyInjection.TelemetryDbConnectionName}"] = _db.ConnectionString,
-            ["Mqtt:Host"] = _mosquitto.Hostname,
-            ["Mqtt:Port"] = _mosquitto.GetMappedPublicPort(1883).ToString(System.Globalization.CultureInfo.InvariantCulture),
-            ["Mqtt:ClientId"] = "instr-ingest",
-        });
-        builder.Services.AddTelemetryIngestion(builder.Configuration);
-        _host = builder.Build();
-        using (IServiceScope scope = _host.Services.CreateScope())
-        {
-            await scope.ServiceProvider.GetRequiredService<TelemetryDbInitializer>()
-                .InitializeAsync(CancellationToken.None);
-        }
-
-        await _host.StartAsync();
+        _host = await stack.StartHostAsync("instr-ingest");
     }
 
     public async Task DisposeAsync()
@@ -95,8 +63,6 @@ public sealed class IngestInstrumentationTests : IAsyncLifetime
 
         _meterListener.Dispose();
         _activityListener.Dispose();
-        await _mosquitto.DisposeAsync();
-        await _db.DisposeAsync();
     }
 
     private static byte[] Envelope(long sequence) =>
@@ -121,29 +87,15 @@ public sealed class IngestInstrumentationTests : IAsyncLifetime
     public async Task Spans_continue_the_device_trace_and_counters_match_a_mixed_batch()
     {
         string topic = TelemetryTopics.Signals("instr-car", "instr-device");
-        using IMqttClient publisher = new MqttClientFactory().CreateMqttClient();
-        await publisher.ConnectAsync(
-            new MqttClientOptionsBuilder()
-                .WithTcpServer(_mosquitto.Hostname, _mosquitto.GetMappedPublicPort(1883))
-                .WithClientId("instr-publisher")
-                .Build(),
-            CancellationToken.None);
-
-        MqttApplicationMessage Message(byte[] payload) => new MqttApplicationMessageBuilder()
-            .WithTopic(topic)
-            .WithPayload(payload)
-            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
-            .Build();
+        using IMqttClient publisher = await stack.ConnectPublisherAsync("instr-publisher");
 
         // Mixed batch: one valid, one malformed, one redelivery of the valid message.
         // A redelivery is byte-identical — the same envelope, not a rebuilt one.
         byte[] validEnvelope = Envelope(1);
-        await publisher.PublishAsync(Message(validEnvelope), CancellationToken.None);
-        await publisher.PublishAsync(Message(Encoding.UTF8.GetBytes("not an envelope")), CancellationToken.None);
-        await publisher.PublishAsync(Message(validEnvelope), CancellationToken.None);
+        await publisher.PublishAsync(MqttIngestEndToEndTests.Message(topic, validEnvelope), CancellationToken.None);
+        await publisher.PublishAsync(MqttIngestEndToEndTests.Message(topic, Encoding.UTF8.GetBytes("not an envelope")), CancellationToken.None);
+        await publisher.PublishAsync(MqttIngestEndToEndTests.Message(topic, validEnvelope), CancellationToken.None);
 
-        // The mixed batch is fully processed once all three received messages are accounted
-        // for in outcome counters: 1 persisted + 1 rejected + 1 deduplicated.
         for (int attempt = 0; attempt < 100; attempt++)
         {
             if (Counter("ingest.messages.persisted") + Counter("ingest.messages.rejected")

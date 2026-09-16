@@ -38,6 +38,22 @@ services:
       timeout: 5s
       retries: 12
 
+  rabbitmq:
+    # Internal bus between bounded contexts (ADR-0004). Management UI on 15672.
+    image: rabbitmq:4-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
   aspire-dashboard:
     # OTLP receiver + trace/metric/log UI; no storage to manage. Built from a one-line
     # derived image that adds a static busybox so the distroless base can probe itself.
@@ -66,6 +82,7 @@ services:
       ConnectionStrings__telemetrydb: Host=timescaledb;Port=5432;Database=telemetrydb;Username=postgres;Password=${POSTGRES_PASSWORD:-postgres}
       Mqtt__Host: mosquitto
       Mqtt__Port: "1883"
+      ConnectionStrings__rabbitmq: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672
       OTEL_EXPORTER_OTLP_ENDPOINT: http://aspire-dashboard:18889
       OTEL_SERVICE_NAME: api
     ports:
@@ -74,6 +91,8 @@ services:
       mosquitto:
         condition: service_healthy
       timescaledb:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
       aspire-dashboard:
         condition: service_started

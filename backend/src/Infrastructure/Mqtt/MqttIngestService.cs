@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MQTTnet;
 using MQTTnet.Protocol;
+using VehicleDiagnostics.Application.Abstractions;
 using VehicleDiagnostics.Application.Telemetry;
 using VehicleDiagnostics.Contracts;
 using VehicleDiagnostics.Infrastructure.Observability;
@@ -13,10 +14,12 @@ using VehicleDiagnostics.Infrastructure.Observability;
 namespace VehicleDiagnostics.Infrastructure.Mqtt;
 
 /// <summary>
-/// Subscribes to <c>veh/+/dev/+/tel/signals</c> at QoS 1 and drives each message through
-/// structural validation into the ingest use case. An explicit reconnect loop replaces the
-/// managed client MQTTnet v5 no longer ships: connectivity is re-checked every second and a
-/// reconnect always re-subscribes. A failing message never stops the pipeline.
+/// Subscribes to <c>tel/signals</c> (P2) and <c>tel/raw</c> (P0) at QoS 1 and drives each
+/// message through structural validation into the matching Telemetry use case: decoded
+/// signals are persisted, raw frames are forwarded to the Signal Decoding context over the
+/// bus. An explicit reconnect loop replaces the managed client MQTTnet v5 no longer ships:
+/// connectivity is re-checked every second and a reconnect always re-subscribes. A failing
+/// message never stops the pipeline.
 /// </summary>
 public sealed partial class MqttIngestService(
     IServiceScopeFactory scopeFactory,
@@ -40,6 +43,9 @@ public sealed partial class MqttIngestService(
         MqttClientSubscribeOptions subscribeOptions = new MqttClientSubscribeOptionsBuilder()
             .WithTopicFilter(f => f
                 .WithTopic(TelemetryTopics.SignalsFilter)
+                .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce))
+            .WithTopicFilter(f => f
+                .WithTopic(TelemetryTopics.RawFilter)
                 .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce))
             .Build();
 
@@ -112,13 +118,29 @@ public sealed partial class MqttIngestService(
 
         IngestDiagnostics.MessagesReceived.Add(1);
 
-        if (!TelemetryTopics.TryParseSignals(topic, out string? vehicleId, out string? deviceId))
+        if (!TelemetryTopics.TryParseTelemetry(topic, out string? vehicleId, out string? deviceId, out TelemetrySubtype subtype))
         {
             IngestDiagnostics.CountRejected("unknown_topic");
             LogRejected(logger, topic, "unknown_topic");
             return;
         }
 
+        switch (subtype)
+        {
+            case TelemetrySubtype.Signals:
+                await ProcessSignalsAsync(topic, payload, vehicleId, deviceId, cancellationToken).ConfigureAwait(false);
+                break;
+            case TelemetrySubtype.Raw:
+                await ProcessRawAsync(topic, payload, vehicleId, deviceId, cancellationToken).ConfigureAwait(false);
+                break;
+            default:
+                IngestDiagnostics.CountRejected("unknown_topic");
+                break;
+        }
+    }
+
+    private async Task ProcessSignalsAsync(string topic, byte[] payload, string vehicleId, string deviceId, CancellationToken cancellationToken)
+    {
         if (!EnvelopeSerializer.TryDeserialize(payload, out MessageEnvelope<SignalReadingsPayload>? envelope, out string? parseError))
         {
             IngestDiagnostics.CountRejected("malformed");
@@ -126,37 +148,10 @@ public sealed partial class MqttIngestService(
             return;
         }
 
-        // The receive span continues the trace the device started; a malformed traceparent
-        // starts a new root and is counted as lost continuity, never as a rejection.
-        ActivityContext parentContext = default;
-        bool traceRestored = ActivityContext.TryParse(envelope.TraceId, null, isRemote: true, out parentContext);
-        using Activity? receiveActivity = IngestDiagnostics.ActivitySource.StartActivity(
-            "ingest.receive", ActivityKind.Consumer, parentContext);
-        receiveActivity?.SetTag("messaging.destination.name", topic);
-        receiveActivity?.SetTag("vehiclediagnostics.device_id", envelope.DeviceId);
-        receiveActivity?.SetTag("vehiclediagnostics.sequence", envelope.Sequence);
+        using Activity? receiveActivity = StartReceive(envelope, topic);
 
-        if (!traceRestored)
+        if (!Validate(envelope, topic, vehicleId, deviceId, EnvelopeValidator.Validate(envelope, vehicleId, deviceId), receiveActivity))
         {
-            IngestDiagnostics.TraceContinuityLost.Add(1);
-        }
-
-        EnvelopeValidationResult validation;
-        using (Activity? validateActivity = IngestDiagnostics.ActivitySource.StartActivity("ingest.validate"))
-        {
-            validation = EnvelopeValidator.Validate(envelope, vehicleId, deviceId);
-            validateActivity?.SetTag("vehiclediagnostics.valid", validation.IsValid);
-        }
-
-        if (!validation.IsValid)
-        {
-            foreach (EnvelopeError error in validation.Errors)
-            {
-                IngestDiagnostics.CountRejected(error.Code);
-            }
-
-            receiveActivity?.SetStatus(ActivityStatusCode.Error, "envelope rejected");
-            LogRejected(logger, topic, string.Join("; ", validation.Errors.Select(e => e.Message)));
             return;
         }
 
@@ -192,6 +187,105 @@ public sealed partial class MqttIngestService(
             default:
                 break;
         }
+    }
+
+    private async Task ProcessRawAsync(string topic, byte[] payload, string vehicleId, string deviceId, CancellationToken cancellationToken)
+    {
+        if (!EnvelopeSerializer.TryDeserializeRaw(payload, out MessageEnvelope<RawFramesPayload>? envelope, out string? parseError))
+        {
+            IngestDiagnostics.CountRejected("malformed");
+            LogRejected(logger, topic, $"malformed: {parseError}");
+            return;
+        }
+
+        using Activity? receiveActivity = StartReceive(envelope, topic);
+
+        if (!Validate(envelope, topic, vehicleId, deviceId, EnvelopeValidator.Validate(envelope, vehicleId, deviceId), receiveActivity))
+        {
+            return;
+        }
+
+        var frames = new RawTelemetryFrames(
+            envelope.DeviceId,
+            envelope.VehicleId,
+            envelope.Sequence,
+            envelope.ProcessingMode,
+            envelope.TimestampDevice,
+            [.. envelope.Payload.Frames.Select(f => new RawFrameData(f.CanId, f.IsExtended, Convert.FromHexString(f.Data)))]);
+
+        await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+        var useCase = scope.ServiceProvider.GetRequiredService<IAcceptRawTelemetry>();
+        AcceptRawOutcome outcome = await useCase.AcceptAsync(frames, cancellationToken).ConfigureAwait(false);
+
+        switch (outcome)
+        {
+            case AcceptRawOutcome.Accepted:
+                IngestDiagnostics.RawForwarded.Add(1);
+                break;
+            case AcceptRawOutcome.Rejected rejected:
+                foreach (var error in rejected.Errors)
+                {
+                    IngestDiagnostics.CountRejected(error.Code);
+                }
+
+                receiveActivity?.SetStatus(ActivityStatusCode.Error, "raw frames rejected");
+                LogRejected(logger, topic, string.Join("; ", rejected.Errors.Select(e => e.Message)));
+                break;
+            default:
+                break;
+        }
+    }
+
+    /// <summary>
+    /// The receive span continues the trace the device started; a malformed traceparent starts
+    /// a new root and is counted as lost continuity, never as a rejection.
+    /// </summary>
+    private static Activity? StartReceive<TPayload>(MessageEnvelope<TPayload> envelope, string topic)
+    {
+        bool traceRestored = ActivityContext.TryParse(envelope.TraceId, null, isRemote: true, out ActivityContext parentContext);
+        Activity? activity = IngestDiagnostics.ActivitySource.StartActivity("ingest.receive", ActivityKind.Consumer, parentContext);
+        activity?.SetTag("messaging.destination.name", topic);
+        activity?.SetTag("vehiclediagnostics.device_id", envelope.DeviceId);
+        activity?.SetTag("vehiclediagnostics.sequence", envelope.Sequence);
+        activity?.SetTag("vehiclediagnostics.processing_mode", envelope.ProcessingMode);
+
+        if (!traceRestored)
+        {
+            IngestDiagnostics.TraceContinuityLost.Add(1);
+        }
+
+        return activity;
+    }
+
+    private bool Validate<TPayload>(
+        MessageEnvelope<TPayload> envelope,
+        string topic,
+        string vehicleId,
+        string deviceId,
+        EnvelopeValidationResult validation,
+        Activity? receiveActivity)
+    {
+        _ = envelope;
+        _ = vehicleId;
+        _ = deviceId;
+        using (Activity? validateActivity = IngestDiagnostics.ActivitySource.StartActivity("ingest.validate"))
+        {
+            validateActivity?.SetTag("vehiclediagnostics.valid", validation.IsValid);
+        }
+
+        if (validation.IsValid)
+        {
+            return true;
+        }
+
+        foreach (EnvelopeError error in validation.Errors)
+        {
+            IngestDiagnostics.CountRejected(error.Code);
+        }
+
+        receiveActivity?.SetStatus(ActivityStatusCode.Error, "envelope rejected");
+        LogRejected(logger, topic, string.Join("; ", validation.Errors.Select(e => e.Message)));
+        return false;
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Connected and subscribed to MQTT broker {Host}:{Port}")]

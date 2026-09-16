@@ -29,6 +29,9 @@ public static class IngestDiagnostics
     public static readonly Counter<long> MessagesPersisted =
         Meter.CreateCounter<long>("ingest.messages.persisted", description: "Messages whose readings were durably stored");
 
+    public static readonly Counter<long> RawForwarded =
+        Meter.CreateCounter<long>("ingest.messages.raw_forwarded", description: "Raw-frame envelopes handed to the Signal Decoding context");
+
     public static readonly Counter<long> TraceContinuityLost =
         Meter.CreateCounter<long>("ingest.trace_continuity_lost", description: "Envelopes whose traceparent was malformed");
 

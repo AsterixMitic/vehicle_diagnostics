@@ -57,7 +57,9 @@ public static class Extensions
             .WithTracing(tracing => tracing
                 .AddAspNetCoreInstrumentation()
                 .AddHttpClientInstrumentation()
-                .AddSource("VehicleDiagnostics.*"));
+                .AddSource("VehicleDiagnostics.*")
+                // Internal bus (ADR-0004): consumer spans continue the publishing trace.
+                .AddSource("MassTransit"));
 
         // Exports to whatever OTEL_EXPORTER_OTLP_ENDPOINT points at — the Aspire
         // dashboard locally, Grafana Alloy later — without code changes.

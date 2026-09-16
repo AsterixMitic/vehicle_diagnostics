@@ -3,9 +3,11 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using VehicleDiagnostics.Application.Abstractions;
+using VehicleDiagnostics.Application.SignalDecoding;
 using VehicleDiagnostics.Application.Telemetry;
 using VehicleDiagnostics.Infrastructure.Events;
 using VehicleDiagnostics.Infrastructure.Health;
+using VehicleDiagnostics.Infrastructure.Messaging;
 using VehicleDiagnostics.Infrastructure.Mqtt;
 using VehicleDiagnostics.Infrastructure.Telemetry;
 
@@ -31,6 +33,13 @@ public static class DependencyInjection
         services.AddScoped<IIngestTelemetry, IngestTelemetry>();
         services.AddSingleton<IDomainEventPublisher, LoggingDomainEventPublisher>();
         services.TryAddSingleton(TimeProvider.System);
+
+        // P0 path: Telemetry accepts raw frames → bus → Signal Decoding decodes → bus → Telemetry persists.
+        services.AddScoped<IAcceptRawTelemetry, AcceptRawTelemetry>();
+        services.AddScoped<IRawFramesPublisher, MassTransitRawFramesPublisher>();
+        services.AddScoped<IDecodeFrames, DecodeFrames>();
+        services.AddScoped<IDecodedSignalsPublisher, MassTransitDecodedSignalsPublisher>();
+        services.AddInternalBus(configuration);
 
         services.Configure<MqttIngestOptions>(configuration.GetSection("Mqtt"));
         services.AddSingleton<MqttConnectionState>();
