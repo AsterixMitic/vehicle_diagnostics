@@ -41,10 +41,20 @@ docker compose --profile demo down -v         # stop and remove everything, incl
 |---|---|---|
 | Host readiness | `http://localhost:5080/health` | `http://localhost:5080/health` |
 | MQTT broker | `localhost:1883` | `localhost:1883` |
+| RabbitMQ management (internal bus) | `http://localhost:15672` (guest/guest) | URL in the dashboard |
 | Dashboard (traces, metrics, logs) | `http://localhost:18888` | URL printed by the AppHost |
 
-A virtual device can also run from the host against either path:
-`MQTT_PORT=1883 dotnet run --project ../experiments/load-generator/VirtualDevice`.
+The virtual device publishes in processing mode **P2** (decoded signals) by default, or **P0**
+(raw OBD-II frames, decoded by the backend over the internal bus):
+
+```bash
+DEVICE_MODE=P0 docker compose --profile demo up -d                 # containerized, P0
+DEVICE_MODE=P2 DEVICE_PREFIX=esp32p2 docker compose --profile demo up -d --no-deps virtual-device
+PROCESSING_MODE=P0 dotnet run --project ../experiments/load-generator/VirtualDevice   # from the host
+```
+
+Both modes derive from one OBD-II encoding of the drive cycle, so a P0 run and a P2 run persist
+identical values for the same sequence number — the comparison the thesis is built on.
 
 ## Layout
 

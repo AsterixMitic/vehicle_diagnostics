@@ -116,9 +116,11 @@ services:
       MQTT_HOST: mosquitto
       MQTT_PORT: "1883"
       VEHICLE_ID: car-01
-      DEVICE_ID_PREFIX: esp32
+      DEVICE_ID_PREFIX: ${DEVICE_PREFIX:-esp32}
       RATE_HZ: "1"
       DEVICE_COUNT: "1"
+      # P0 publishes raw OBD-II frames (backend decodes); P2 publishes decoded signals.
+      PROCESSING_MODE: ${DEVICE_MODE:-P2}
       HEARTBEAT_FILE: /tmp/heartbeat
     depends_on:
       api:

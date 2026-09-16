@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
@@ -77,7 +78,17 @@ public static class Extensions
     {
         ArgumentNullException.ThrowIfNull(app);
 
-        app.MapHealthChecks("/health");
+        // Readiness: a degraded dependency (e.g. the bus reconnecting) is not ready. ASP.NET
+        // would otherwise answer 200 for Degraded, which status-code probers read as healthy.
+        app.MapHealthChecks("/health", new HealthCheckOptions
+        {
+            ResultStatusCodes =
+            {
+                [HealthStatus.Healthy] = StatusCodes.Status200OK,
+                [HealthStatus.Degraded] = StatusCodes.Status503ServiceUnavailable,
+                [HealthStatus.Unhealthy] = StatusCodes.Status503ServiceUnavailable,
+            },
+        });
         app.MapHealthChecks("/alive", new HealthCheckOptions
         {
             Predicate = registration => registration.Tags.Contains(LivenessTag),
