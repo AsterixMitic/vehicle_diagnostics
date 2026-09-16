@@ -4,6 +4,11 @@
     <ProjectReference Include="../../src/Domain/Domain.csproj" />
   </ItemGroup>
 
+  <!-- Recorded CAN captures are decoder regression fixtures (testing requirements). -->
+  <ItemGroup>
+    <None Include="../../../experiments/captures/**" LinkBase="captures" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />

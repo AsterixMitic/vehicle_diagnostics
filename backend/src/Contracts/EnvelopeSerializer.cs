@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 
 namespace VehicleDiagnostics.Contracts;
 
@@ -16,19 +17,39 @@ public static class EnvelopeSerializer
             envelope, ContractsJsonContext.Default.MessageEnvelopeSignalReadingsPayload);
     }
 
+    public static byte[] Serialize(MessageEnvelope<RawFramesPayload> envelope)
+    {
+        ArgumentNullException.ThrowIfNull(envelope);
+        return JsonSerializer.SerializeToUtf8Bytes(
+            envelope, ContractsJsonContext.Default.MessageEnvelopeRawFramesPayload);
+    }
+
     /// <summary>
-    /// Parses an envelope. Unknown extra JSON properties are tolerated (forward
+    /// Parses a decoded-signals envelope. Unknown extra JSON properties are tolerated (forward
     /// compatibility within a major schema version); missing required fields are not.
     /// </summary>
     public static bool TryDeserialize(
         ReadOnlySpan<byte> utf8Json,
         [NotNullWhen(true)] out MessageEnvelope<SignalReadingsPayload>? envelope,
+        [NotNullWhen(false)] out string? parseError) =>
+        TryDeserialize(utf8Json, ContractsJsonContext.Default.MessageEnvelopeSignalReadingsPayload, out envelope, out parseError);
+
+    /// <summary>Parses a raw-frames envelope with the same tolerance rules as the signals variant.</summary>
+    public static bool TryDeserializeRaw(
+        ReadOnlySpan<byte> utf8Json,
+        [NotNullWhen(true)] out MessageEnvelope<RawFramesPayload>? envelope,
+        [NotNullWhen(false)] out string? parseError) =>
+        TryDeserialize(utf8Json, ContractsJsonContext.Default.MessageEnvelopeRawFramesPayload, out envelope, out parseError);
+
+    private static bool TryDeserialize<TPayload>(
+        ReadOnlySpan<byte> utf8Json,
+        JsonTypeInfo<MessageEnvelope<TPayload>> typeInfo,
+        [NotNullWhen(true)] out MessageEnvelope<TPayload>? envelope,
         [NotNullWhen(false)] out string? parseError)
     {
         try
         {
-            envelope = JsonSerializer.Deserialize(
-                utf8Json, ContractsJsonContext.Default.MessageEnvelopeSignalReadingsPayload);
+            envelope = JsonSerializer.Deserialize(utf8Json, typeInfo);
         }
         catch (JsonException exception)
         {

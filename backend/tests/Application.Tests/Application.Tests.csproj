@@ -3,6 +3,8 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Application/Application.csproj" />
     <ProjectReference Include="../../src/Contracts/Contracts.csproj" />
+    <!-- The virtual device's OBD-II encoding must round-trip through the real decoder (design D7). -->
+    <ProjectReference Include="../../../experiments/load-generator/VirtualDevice/VirtualDevice.csproj" />
   </ItemGroup>
 
   <ItemGroup>

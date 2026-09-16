@@ -8,4 +8,5 @@ namespace VehicleDiagnostics.Contracts;
 /// </summary>
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(MessageEnvelope<SignalReadingsPayload>))]
+[JsonSerializable(typeof(MessageEnvelope<RawFramesPayload>))]
 public sealed partial class ContractsJsonContext : JsonSerializerContext;

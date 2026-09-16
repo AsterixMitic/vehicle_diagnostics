@@ -1,8 +1,7 @@
-using VehicleDiagnostics.Domain.SharedKernel;
 
-namespace VehicleDiagnostics.Domain.Telemetry;
+namespace VehicleDiagnostics.Domain.SharedKernel;
 
-/// <summary>Name of a decoded physical signal (e.g. <c>engine_rpm</c>).</summary>
+/// <summary>Name of a physical signal (e.g. <c>engine_rpm</c>). Shared kernel: both the Telemetry and Signal Decoding contexts speak it.</summary>
 public readonly record struct SignalName
 {
     private const int MaxLength = 128;

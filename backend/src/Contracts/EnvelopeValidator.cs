@@ -14,11 +14,16 @@ public sealed record EnvelopeValidationResult
 /// <summary>
 /// Structural validation of a parsed telemetry envelope against the message-contracts spec:
 /// supported schema version, present and well-formed identity fields, topic/envelope identity
-/// agreement, known processing mode. Semantic validation of individual readings (finite value,
-/// non-blank name) is the ingest use case's job, via the domain factories.
+/// agreement, known processing mode, plus payload-shape rules per stream. Semantic validation of
+/// individual readings (finite value, non-blank name) is the ingest use case's job, via the
+/// domain factories.
 /// </summary>
 public static class EnvelopeValidator
 {
+    private const uint MaxStandardId = 0x7FF;
+    private const uint MaxExtendedId = 0x1FFFFFFF;
+    private const int MaxDataHexLength = 16;
+
     private static readonly string[] KnownProcessingModes = ["P0", "P1", "P2", "P3"];
 
     public static EnvelopeValidationResult Validate(
@@ -27,6 +32,57 @@ public static class EnvelopeValidator
         string topicDeviceId)
     {
         ArgumentNullException.ThrowIfNull(envelope);
+        List<EnvelopeError> errors = ValidateCommon(envelope, topicVehicleId, topicDeviceId);
+
+        // An envelope with nothing to persist would still consume its sequence number for
+        // deduplication; rejecting it keeps "persisted" and "accepted" in lockstep.
+        if (envelope.Payload.Readings is null or { Count: 0 })
+        {
+            errors.Add(new EnvelopeError(EnvelopeError.EmptyPayload, "'payload.readings' is empty."));
+        }
+
+        return Finish(envelope, errors);
+    }
+
+    public static EnvelopeValidationResult Validate(
+        MessageEnvelope<RawFramesPayload> envelope,
+        string topicVehicleId,
+        string topicDeviceId)
+    {
+        ArgumentNullException.ThrowIfNull(envelope);
+        List<EnvelopeError> errors = ValidateCommon(envelope, topicVehicleId, topicDeviceId);
+
+        if (envelope.Payload.Frames is null or { Count: 0 })
+        {
+            errors.Add(new EnvelopeError(EnvelopeError.EmptyPayload, "'payload.frames' is empty."));
+            return Finish(envelope, errors);
+        }
+
+        for (int i = 0; i < envelope.Payload.Frames.Count; i++)
+        {
+            CanFrameDto frame = envelope.Payload.Frames[i];
+            uint maxId = frame.IsExtended ? MaxExtendedId : MaxStandardId;
+            if (frame.CanId > maxId)
+            {
+                errors.Add(new EnvelopeError(
+                    EnvelopeError.InvalidField,
+                    $"frames[{i}].canId 0x{frame.CanId:X} exceeds the {(frame.IsExtended ? "29" : "11")}-bit range."));
+            }
+
+            if (!IsValidDataHex(frame.Data))
+            {
+                errors.Add(new EnvelopeError(
+                    EnvelopeError.InvalidField,
+                    $"frames[{i}].data must be an even-length hex string of at most {MaxDataHexLength} characters."));
+            }
+        }
+
+        return Finish(envelope, errors);
+    }
+
+    private static List<EnvelopeError> ValidateCommon<TPayload>(
+        MessageEnvelope<TPayload> envelope, string topicVehicleId, string topicDeviceId)
+    {
         List<EnvelopeError> errors = [];
 
         if (envelope.SchemaVersion != EnvelopeSerializer.CurrentSchemaVersion)
@@ -76,17 +132,31 @@ public static class EnvelopeValidator
                 $"Topic vehicleId '{topicVehicleId}' does not match envelope vehicleId '{envelope.VehicleId}'."));
         }
 
-        // An envelope with nothing to persist would still consume its sequence number for
-        // deduplication; rejecting it keeps "persisted" and "accepted" in lockstep.
-        if (envelope.Payload.Readings is null or { Count: 0 })
-        {
-            errors.Add(new EnvelopeError(EnvelopeError.EmptyPayload, "'payload.readings' is empty."));
-        }
+        return errors;
+    }
 
-        return new EnvelopeValidationResult
+    private static EnvelopeValidationResult Finish<TPayload>(MessageEnvelope<TPayload> envelope, List<EnvelopeError> errors) =>
+        new()
         {
             Errors = errors,
             TraceContextIsValid = TraceParent.IsValid(envelope.TraceId),
         };
+
+    private static bool IsValidDataHex(string? data)
+    {
+        if (data is null || data.Length % 2 != 0 || data.Length > MaxDataHexLength)
+        {
+            return false;
+        }
+
+        foreach (char c in data)
+        {
+            if (!char.IsAsciiHexDigit(c))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
