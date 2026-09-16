@@ -32,20 +32,36 @@ public sealed class DeviceSimulator(string host, int port, string vehicleId, str
 
         try
         {
-            await client.ConnectAsync(options, cancellationToken).ConfigureAwait(false);
-            Console.WriteLine($"[{deviceId}] connected, publishing to '{topic}' every {interval.TotalMilliseconds:F0} ms");
-
-            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+            while (!cancellationToken.IsCancellationRequested)
             {
-                elapsedSeconds += interval.TotalSeconds;
-                Advance(elapsedSeconds, interval.TotalSeconds);
+                // Like the real gateway, the simulator reconnects on its own after a broker
+                // outage; the sequence keeps counting so redeliveries stay detectable.
+                try
+                {
+                    if (!client.IsConnected)
+                    {
+                        await client.ConnectAsync(options, cancellationToken).ConfigureAwait(false);
+                        Console.WriteLine($"[{deviceId}] connected, publishing to '{topic}' every {interval.TotalMilliseconds:F0} ms");
+                    }
 
-                MqttApplicationMessage message = new MqttApplicationMessageBuilder()
-                    .WithTopic(topic)
-                    .WithPayload(EnvelopeSerializer.Serialize(BuildEnvelope()))
-                    .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
-                    .Build();
-                await client.PublishAsync(message, cancellationToken).ConfigureAwait(false);
+                    while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+                    {
+                        elapsedSeconds += interval.TotalSeconds;
+                        Advance(elapsedSeconds, interval.TotalSeconds);
+
+                        MqttApplicationMessage message = new MqttApplicationMessageBuilder()
+                            .WithTopic(topic)
+                            .WithPayload(EnvelopeSerializer.Serialize(BuildEnvelope()))
+                            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
+                            .Build();
+                        await client.PublishAsync(message, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    Console.WriteLine($"[{deviceId}] connection lost ({exception.GetType().Name}); retrying in 2 s");
+                    await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
+                }
             }
         }
         catch (OperationCanceledException)
