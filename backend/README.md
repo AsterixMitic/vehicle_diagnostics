@@ -23,9 +23,28 @@ dotnet test VehicleDiagnostics.slnx                           # unit + architect
 
 ## Running the stack
 
+Two equivalent paths. Aspire is the day-to-day one; Compose needs no .NET SDK on the machine.
+
 ```bash
 dotnet run --project src/AppHost      # Mosquitto + TimescaleDB + Api, with the Aspire dashboard
 ```
+
+```bash
+cd ../deploy/compose
+docker compose up -d --build                  # broker, database, dashboard, host (built from source)
+docker compose --profile demo up -d --build   # ... plus a virtual device publishing at 1 Hz
+docker compose ps                             # every container reports a health status
+docker compose --profile demo down -v         # stop and remove everything, including data
+```
+
+| Endpoint | Compose | Aspire |
+|---|---|---|
+| Host readiness | `http://localhost:5080/health` | `http://localhost:5080/health` |
+| MQTT broker | `localhost:1883` | `localhost:1883` |
+| Dashboard (traces, metrics, logs) | `http://localhost:18888` | URL printed by the AppHost |
+
+A virtual device can also run from the host against either path:
+`MQTT_PORT=1883 dotnet run --project ../experiments/load-generator/VirtualDevice`.
 
 ## Layout
 

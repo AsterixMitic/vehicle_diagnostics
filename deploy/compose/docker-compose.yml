@@ -1,0 +1,99 @@
+# Local stack as containers — the second orchestration path next to the Aspire AppHost.
+#
+#   docker compose up -d --build                  # broker + database + dashboard + host
+#   docker compose --profile demo up -d --build   # ... plus a virtual device publishing telemetry
+#   docker compose --profile demo down -v         # stop and remove everything, including data
+#
+# Dev-only posture (ADR-0003): anonymous broker, plain TCP, unauthenticated dashboard,
+# all ports bound to localhost.
+
+name: vehiclediagnostics
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "127.0.0.1:1883:1883"
+    volumes:
+      - ../../edge/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    healthcheck:
+      # A real subscription round-trip, not just an open port.
+      test: ["CMD", "mosquitto_sub", "-h", "localhost", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "3"]
+      interval: 5s
+      timeout: 5s
+      retries: 6
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg17
+    environment:
+      POSTGRES_DB: telemetrydb
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - telemetry-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d telemetrydb"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  aspire-dashboard:
+    # OTLP receiver + trace/metric/log UI; no storage to manage.
+    # The image is distroless (no shell, no probe binary), so it cannot self-report health;
+    # its availability is verified externally: curl http://localhost:18888/ from the host.
+    # The host's OTLP exporter buffers and retries, so the dashboard is not a startup gate.
+    image: mcr.microsoft.com/dotnet/aspire-dashboard:13.5.2
+    environment:
+      DOTNET_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS: "true"
+    ports:
+      - "127.0.0.1:18888:18888"   # UI
+      - "127.0.0.1:18889:18889"   # OTLP gRPC, for hosts running outside compose
+
+  api:
+    build:
+      context: ../..
+      dockerfile: backend/src/Api/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__telemetrydb: Host=timescaledb;Port=5432;Database=telemetrydb;Username=postgres;Password=${POSTGRES_PASSWORD:-postgres}
+      Mqtt__Host: mosquitto
+      Mqtt__Port: "1883"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://aspire-dashboard:18889
+      OTEL_SERVICE_NAME: api
+    ports:
+      - "127.0.0.1:5080:8080"
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+      aspire-dashboard:
+        condition: service_started
+    healthcheck:
+      # Readiness endpoint via bash's /dev/tcp (the runtime image has neither curl nor wget).
+      # Whole-line match so "Unhealthy" cannot pass.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /health HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -qx Healthy <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  virtual-device:
+    profiles: ["demo"]
+    build:
+      context: ../..
+      dockerfile: experiments/load-generator/VirtualDevice/Dockerfile
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      VEHICLE_ID: car-01
+      DEVICE_ID_PREFIX: esp32
+      RATE_HZ: "1"
+      DEVICE_COUNT: "1"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  telemetry-data:

@@ -1,0 +1,12 @@
+# Build context is the repository root; keep everything an image build does not need out of it.
+.git/
+.dotnet/
+.idea/
+docs/
+thesis/
+deploy/
+**/bin/
+**/obj/
+**/TestResults/
+**/*.md
+!backend/README.md
