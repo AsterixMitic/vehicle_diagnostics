@@ -26,3 +26,9 @@ appsettings.*.Local.json
 
 # Aspire CLI local settings
 aspire.config.json
+
+# Firmware build output
+firmware/**/build/
+firmware/**/sdkconfig
+firmware/**/sdkconfig.old
+firmware/**/managed_components/
