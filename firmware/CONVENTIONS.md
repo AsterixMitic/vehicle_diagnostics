@@ -34,11 +34,23 @@ application  →  diagnostics  →  transport  →  link  →  hardware abstract
 Each layer depends only on the one directly beneath it, declared in its `CMakeLists.txt` under
 `REQUIRES`. A layer that reaches past its neighbour fails to link, which is the point.
 
-**Only the `gw_hal` component may include `driver/*` or `esp_*` headers, and only in its `.c`
-files.** Every public header in this tree must compile on a development machine with no
-ESP-IDF installed. That is what makes the protocol layers testable without hardware, and it is
-not negotiable: a vendor include in a public header silently removes a whole layer from the
-host test build.
+Two separate rules, often confused. Keep them apart.
+
+**Peripherals: only `gw_hal`.** No component other than `gw_hal` may call a driver, touch a
+register or configure a peripheral. This is what keeps a controller change confined to one
+file.
+
+**Operating system: allowed where a component owns a task.** `can_link` owns the receive task,
+so `freertos/*` and `esp_log.h` in its `.c` file are correct, not a violation. Abstracting the
+scheduler to test a scheduler-owning component would only test the abstraction.
+
+**Public headers: never a vendor include, anywhere, including `gw_hal`'s own.** A header must
+compile on a machine with no ESP-IDF installed. This is the rule that makes host testing
+possible, and one stray include in a header silently removes a whole layer from the host build.
+
+**What must be host-testable** (architecture.md §7): logic that is not inherently tied to
+hardware or the scheduler — frame buffers, the ISO-TP state machine, decoders. Task owners and
+driver wrappers are verified on the target instead, real or emulated.
 
 **Component names share one namespace with ESP-IDF's own.** The hardware abstraction is
 `gw_hal`, not `hal`, because ESP-IDF ships a core component called `hal` and a local component
