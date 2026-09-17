@@ -1,0 +1,9 @@
+# Test application defaults. Kept separate from the gateway's so test settings never leak
+# into the shipping firmware.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# The emulator has no watchdog-feeding peripherals; a halted test task must not trip it.
+CONFIG_ESP_INT_WDT=n
+CONFIG_ESP_TASK_WDT_EN=n
