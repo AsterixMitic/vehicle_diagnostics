@@ -4,7 +4,11 @@ Visual companion to `../architecture.md`, which stays the single source of truth
 diagram and that document disagree, the document wins and the diagram is the bug.
 
 Status marking is deliberate: this is a thesis in progress, so each diagram distinguishes what
-is **implemented and verified** from what is **specified but not yet built**.
+is **implemented and verified**, what is **built but not yet wired into a running path**, and
+what is **specified but not yet built**.
+
+Companion documents: `hardware-wiring.md` for how to connect the boards, `backend-detail.md`
+for the server side at the level of its actual types and messages.
 
 ---
 
@@ -66,13 +70,17 @@ flowchart TB
     K8S --> LONG
 
     classDef built fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
+    classDef partial fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f
     classDef planned fill:#f1f5f9,stroke:#94a3b8,stroke-dasharray:5 5,color:#334155
     class MQ,API,BUS,TS,OTEL,VD built
-    class CAR,SIM,REP,HAL,TP,DG,PR,NET,K8S,LGTM,LONG planned
+    class HAL,TP partial
+    class CAR,SIM,REP,DG,PR,NET,K8S,LGTM,LONG planned
 ```
 
-Green with a solid border is implemented and verified. Grey with a dashed border is specified
-but not yet built.
+Green with a solid border is implemented and verified. Amber is built and tested but not yet
+wired into a running path: the CAN link layer runs but sends only a fixed frame, and the ISO-TP
+transport layer is complete and covered by tests without the diagnostic client that will drive
+it. Grey with a dashed border is specified but not yet built.
 
 **Architecture invariant.** The boundary and the protocol between layers are identical in every
 processing mode. Only *which layer performs which phase* changes. Without that invariant the
