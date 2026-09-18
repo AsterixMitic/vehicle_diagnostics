@@ -13,12 +13,15 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "test_can_ring_buffer.h"
+#include "test_isotp.h"
 
 void app_main(void)
 {
     printf("\ntarget unit tests (Xtensa)\n");
 
-    const int failures = can_ring_buffer_tests_run();
+    int failures = 0;
+    failures += can_ring_buffer_tests_run();
+    failures += isotp_tests_run();
 
     if (failures == 0) {
         printf("RESULT: PASS\n");

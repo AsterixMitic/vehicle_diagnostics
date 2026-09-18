@@ -8,11 +8,15 @@
 #include <stdio.h>
 
 #include "test_can_ring_buffer.h"
+#include "test_isotp.h"
 
 int main(void)
 {
     printf("host unit tests\n");
-    const int failures = can_ring_buffer_tests_run();
+
+    int failures = 0;
+    failures += can_ring_buffer_tests_run();
+    failures += isotp_tests_run();
 
     if (failures == 0) {
         printf("PASS\n");

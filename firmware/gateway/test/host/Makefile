@@ -16,11 +16,17 @@ COMPONENTS := $(ROOT)/components
 SHARED     := ../shared
 BUILD      := build
 
-INCLUDES := -I$(COMPONENTS)/gw_hal/include -I$(COMPONENTS)/can_link/include -I$(SHARED)
+INCLUDES := \
+	-I$(COMPONENTS)/gw_hal/include \
+	-I$(COMPONENTS)/can_link/include \
+	-I$(COMPONENTS)/isotp/include \
+	-I$(SHARED)
 
 SOURCES := \
 	$(COMPONENTS)/can_link/can_ring_buffer.c \
+	$(COMPONENTS)/isotp/isotp.c \
 	$(SHARED)/test_can_ring_buffer.c \
+	$(SHARED)/test_isotp.c \
 	main.c
 
 TARGET := $(BUILD)/host_tests
