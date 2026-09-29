@@ -51,6 +51,7 @@ public static class DependencyInjection
         services.AddScoped<AnalyticsDbInitializer>();
         services.AddScoped<IMessageLogRepository, PostgresMessageLogRepository>();
         services.AddScoped<IRecordSettlement, RecordSettlement>();
+        services.AddScoped<IEvaluationQueries, TimescaleEvaluationQueries>();
         services.AddInternalBus(configuration);
 
         services.Configure<MqttIngestOptions>(configuration.GetSection("Mqtt"));
