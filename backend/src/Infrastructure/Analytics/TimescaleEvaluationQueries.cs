@@ -118,11 +118,25 @@ public sealed class TimescaleEvaluationQueries(AnalyticsDbContext context) : IEv
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        double bucketSeconds = bucket.Value.TotalSeconds;
-        List<ModeSeriesPoint> points = [.. rows.Select(r => new ModeSeriesPoint(
-            r.BucketStart, r.Mode, r.Received, r.Received / bucketSeconds, r.Bytes / bucketSeconds, r.EndToEndP95))];
+        List<ModeSeriesPoint> points = [.. rows.Select(r =>
+        {
+            double seconds = SecondsInside(range, r.BucketStart, bucket.Value);
+            return new ModeSeriesPoint(r.BucketStart, r.Mode, r.Received, r.Received / seconds, r.Bytes / seconds, r.EndToEndP95);
+        })];
 
         return new EvaluationSeries(range.From, range.To, bucket.Value, points);
+    }
+
+    /// <summary>
+    /// The part of a bucket that lies inside the range. Buckets are aligned to a fixed origin, so
+    /// the first and last usually stick out of the range; dividing their counts by the full width
+    /// would draw a false drop in throughput at both ends of every chart.
+    /// </summary>
+    private static double SecondsInside(TimeRange range, DateTimeOffset bucketStart, TimeSpan width)
+    {
+        DateTimeOffset start = bucketStart > range.From ? bucketStart : range.From;
+        DateTimeOffset end = bucketStart + width < range.To ? bucketStart + width : range.To;
+        return Math.Max((end - start).TotalSeconds, 1e-3);
     }
 
     private static NpgsqlParameter[] RangeParameters(TimeRange range) =>

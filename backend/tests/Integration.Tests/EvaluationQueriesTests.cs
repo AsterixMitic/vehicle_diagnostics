@@ -168,6 +168,23 @@ public sealed class EvaluationQueriesTests(TimescaleDbFixture fixture)
             .Which.BucketStart.Should().Be(T0.AddSeconds(60));
     }
 
+    [Fact]
+    public async Task Rates_of_buckets_cut_by_the_range_count_only_the_part_inside()
+    {
+        // [15 s, 45 s) cuts both 30 s buckets in half: P2 has sequence 4 at 20 s in the first half
+        // bucket and sequence 7 at 30 s plus its duplicate at 40 s in the second.
+        TimeRange cut = TimeRange.Create(T0.AddSeconds(15), T0.AddSeconds(45), T0).Value;
+        BucketWidth thirty = BucketWidth.Resolve(cut, TimeSpan.FromSeconds(30)).Value;
+
+        EvaluationSeries series = await _queries.SeriesAsync(cut, thirty, CancellationToken.None);
+
+        ModeSeriesPoint[] p2 = [.. series.Points.Where(p => p.Mode == "P2")];
+        p2.Select(p => p.BucketStart).Should().Equal(T0, T0.AddSeconds(30));
+        p2[0].MessagesPerSecond.Should().BeApproximately(1 / 15.0, 1e-9);
+        p2[1].MessagesPerSecond.Should().BeApproximately(2 / 15.0, 1e-9);
+        p2[1].BytesPerSecond.Should().BeApproximately(400 / 15.0, 1e-9);
+    }
+
     private MessageMeasurement Persisted(
         string device, long sequence, ProcessingMode mode, DateTimeOffset received, double transportMs, double backendMs, int bytes) =>
         MessageMeasurement.Create(
