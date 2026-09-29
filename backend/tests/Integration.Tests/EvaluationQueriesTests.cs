@@ -84,8 +84,8 @@ public sealed class EvaluationQueriesTests(TimescaleDbFixture fixture)
         p2.Duplicates.Should().Be(1);
         p2.Rejected.Should().Be(0);
         p2.Lost.Should().Be(3);                          // 7 − 1 + 1 − |{1, 2, 4, 7}|
-        p2.MessagesPerSecond.Should().Be(5 / 40.0);      // active interval 0 → 40 s
-        p2.BytesPerSecond.Should().Be(1000 / 40.0);
+        p2.MessagesPerSecond.Should().Be(4 / 40.0);      // 5 messages, 4 intervals over 0 → 40 s
+        p2.BytesPerSecond.Should().Be(200 * 4 / 40.0);   // mean size × message rate
         p2.MeanPayloadBytes.Should().Be(200);
 
         ModeSummary p0 = summary.Modes.Single(m => m.Mode == "P0");
@@ -93,12 +93,14 @@ public sealed class EvaluationQueriesTests(TimescaleDbFixture fixture)
         p0.Persisted.Should().Be(1);
         p0.Rejected.Should().Be(1);
         p0.Lost.Should().Be(0);
-        p0.MessagesPerSecond.Should().BeApproximately(2 / 49.5, 1e-9);
+        p0.MessagesPerSecond.Should().BeApproximately(1 / 49.5, 1e-9);
+        p0.BytesPerSecond.Should().BeApproximately(290 / 49.5, 1e-9);
         p0.MeanPayloadBytes.Should().Be(290);
 
         ModeSummary unknown = summary.Modes.Single(m => m.Mode == ModeSummary.UnknownMode);
         unknown.Rejected.Should().Be(1);
         unknown.MessagesPerSecond.Should().Be(1 / 100.0); // single message: whole range
+        unknown.BytesPerSecond.Should().Be(40 / 100.0);
         unknown.EndToEnd.Should().BeNull();
     }
 

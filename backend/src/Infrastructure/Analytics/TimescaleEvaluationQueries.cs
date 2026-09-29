@@ -9,8 +9,10 @@ namespace VehicleDiagnostics.Infrastructure.Analytics;
 /// <summary>
 /// Evaluation queries over <c>analytics.message_log</c>, one SQL statement each (design D6):
 /// counts by outcome, continuous percentiles of the three latencies over persisted messages,
-/// sequence gaps per device, and <c>time_bucket</c> series. Rates are divided by a mode's active
-/// interval (first to last receipt), or by the whole range when that is under a second.
+/// sequence gaps per device, and <c>time_bucket</c> series. Rates count the intervals between a
+/// mode's first and last receipt, so N messages over their active span give (N − 1) / span and a
+/// device sending at exactly 1 Hz reports 1 per second; a mode with one message, or an active span
+/// under a second, is divided by the whole range instead.
 /// </summary>
 public sealed class TimescaleEvaluationQueries(AnalyticsDbContext context) : IEvaluationQueries
 {
@@ -94,10 +96,12 @@ public sealed class TimescaleEvaluationQueries(AnalyticsDbContext context) : IEv
         double rangeSeconds = range.Span.TotalSeconds;
         List<ModeSummary> modes = [.. rows.Select(r =>
         {
-            double seconds = r.ActiveSeconds >= 1 ? r.ActiveSeconds : rangeSeconds;
+            (double messagesPerSecond, double bytesPerSecond) = r.Received >= 2 && r.ActiveSeconds >= 1
+                ? ((r.Received - 1) / r.ActiveSeconds, (r.MeanPayloadBytes ?? 0) * (r.Received - 1) / r.ActiveSeconds)
+                : (r.Received / rangeSeconds, r.Bytes / rangeSeconds);
             return new ModeSummary(
                 r.Mode, r.Received, r.Persisted, r.Duplicates, r.Rejected, r.Lost,
-                r.Received / seconds, r.Bytes / seconds, r.MeanPayloadBytes,
+                messagesPerSecond, bytesPerSecond, r.MeanPayloadBytes,
                 Percentiles(r.EndToEndP50, r.EndToEndP95, r.EndToEndP99),
                 Percentiles(r.TransportP50, r.TransportP95, r.TransportP99),
                 Percentiles(r.BackendP50, r.BackendP95, r.BackendP99));
