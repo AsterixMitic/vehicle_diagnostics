@@ -1,0 +1,40 @@
+<header class="heading">
+  <h1>Уређаји</h1>
+  <vd-range-picker [selection]="selection()" (selectionChange)="select($event)" />
+  <button mat-stroked-button type="button" (click)="refresh()">Освежи</button>
+</header>
+
+<vd-data-state
+  [source]="devices"
+  [empty]="(devices.value() ?? []).length === 0"
+  emptyText="Ниједан уређај није слао податке у изабраном опсегу."
+>
+  <table mat-table [dataSource]="devices.value() ?? []">
+    <ng-container matColumnDef="device">
+      <th mat-header-cell *matHeaderCellDef>Уређај</th>
+      <td mat-cell *matCellDef="let d">{{ d.deviceId }}</td>
+    </ng-container>
+    <ng-container matColumnDef="vehicle">
+      <th mat-header-cell *matHeaderCellDef>Возило</th>
+      <td mat-cell *matCellDef="let d">{{ d.vehicleId }}</td>
+    </ng-container>
+    <ng-container matColumnDef="lastSeen">
+      <th mat-header-cell *matHeaderCellDef>Последњи узорак</th>
+      <td mat-cell *matCellDef="let d">{{ formatDateTime(d.lastSeen) }}</td>
+    </ng-container>
+    <ng-container matColumnDef="mode">
+      <th mat-header-cell *matHeaderCellDef>Режим</th>
+      <td mat-cell *matCellDef="let d"><vd-mode-badge [mode]="d.processingMode" /></td>
+    </ng-container>
+    <ng-container matColumnDef="links">
+      <th mat-header-cell *matHeaderCellDef><span class="visually-hidden">Прикази</span></th>
+      <td mat-cell *matCellDef="let d" class="links">
+        <a mat-button routerLink="/live" [queryParams]="{ device: d.deviceId }">Уживо</a>
+        <a mat-button routerLink="/history" [queryParams]="{ device: d.deviceId }">Историја</a>
+      </td>
+    </ng-container>
+
+    <tr mat-header-row *matHeaderRowDef="columns"></tr>
+    <tr mat-row *matRowDef="let row; columns: columns"></tr>
+  </table>
+</vd-data-state>

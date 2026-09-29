@@ -1,0 +1,21 @@
+.heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+
+  h1 {
+    margin: 0 16px 0 0;
+    font: var(--mat-sys-headline-small);
+  }
+}
+
+table {
+  width: 100%;
+}
+
+.links {
+  text-align: right;
+  white-space: nowrap;
+}
