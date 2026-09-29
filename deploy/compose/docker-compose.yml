@@ -107,6 +107,23 @@ services:
       retries: 3
       start_period: 20s
 
+  web:
+    # The dashboard (ADR-0005): nginx serves the Angular build and forwards /api to the host.
+    build:
+      context: ../../frontend
+    ports:
+      - "127.0.0.1:4280:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      # Healthy only when it serves the application and its proxy reaches the backend.
+      test: ["CMD-SHELL", "wget -qO /dev/null http://127.0.0.1/ && wget -qO /dev/null http://127.0.0.1/api/devices"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
   virtual-device:
     profiles: ["demo"]
     build:

@@ -1,5 +1,8 @@
+# Install scripts of dependencies are denied: the build and tests need none of them (esbuild
+# ships its binary as a platform package; the others are optional native accelerators).
+# Listing them explicitly lets a non-interactive install (CI, Docker) proceed.
 allowBuilds:
-  '@parcel/watcher': set this to true or false
-  esbuild: set this to true or false
-  lmdb: set this to true or false
-  msgpackr-extract: set this to true or false
+  '@parcel/watcher': false
+  esbuild: false
+  lmdb: false
+  msgpackr-extract: false

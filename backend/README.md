@@ -43,6 +43,7 @@ docker compose --profile demo down -v         # stop and remove everything, incl
 | MQTT broker | `localhost:1883` | `localhost:1883` |
 | RabbitMQ management (internal bus) | `http://localhost:15672` (guest/guest) | URL in the dashboard |
 | Dashboard (traces, metrics, logs) | `http://localhost:18888` | URL printed by the AppHost |
+| Thesis dashboard (ADR-0005) | `http://localhost:4280` | `pnpm --dir frontend start`, then `http://localhost:4200` |
 
 The virtual device publishes in processing mode **P2** (decoded signals) by default, or **P0**
 (raw OBD-II frames, decoded by the backend over the internal bus):
