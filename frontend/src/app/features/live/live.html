@@ -1,0 +1,63 @@
+<header class="heading">
+  <h1>Уживо</h1>
+  <vd-data-state
+    [source]="devices"
+    [empty]="(devices.value() ?? []).length === 0"
+    emptyText="Ниједан уређај није слао податке у последњих 15 минута."
+  >
+    <mat-form-field subscriptSizing="dynamic">
+      <mat-label>Уређај</mat-label>
+      <mat-select [value]="device()" (selectionChange)="choose($event.value)">
+        @for (d of devices.value() ?? []; track d.deviceId) {
+          <mat-option [value]="d.deviceId">{{ d.deviceId }} · {{ d.processingMode }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+  </vd-data-state>
+  @if (device()) {
+    <span class="connection" [class.open]="stream.connection() === 'open'" role="status">{{
+      connectionText()
+    }}</span>
+  }
+</header>
+
+@if (device()) {
+  <section aria-label="Последње вредности">
+    <vd-data-state
+      [source]="latest"
+      [empty]="cards().length === 0"
+      emptyText="Уређај још нема сачуваних очитавања."
+    >
+      <div class="cards">
+        @for (c of cards(); track c.id) {
+          <mat-card appearance="outlined" class="value-card">
+            <mat-card-content>
+              <div class="name">{{ c.name }}</div>
+              <div class="id">{{ c.id }}</div>
+              <div class="value">
+                {{ c.value }} <span class="unit">{{ c.unit }}</span>
+              </div>
+              <div class="time">{{ c.sampledAt }}</div>
+            </mat-card-content>
+          </mat-card>
+        }
+      </div>
+    </vd-data-state>
+  </section>
+
+  <section aria-label="Графикони уживо" class="charts">
+    @for (c of charts(); track c.id) {
+      <mat-card appearance="outlined">
+        <mat-card-header>
+          <mat-card-title>{{ c.title }}</mat-card-title>
+          <mat-card-subtitle>{{ c.id }}</mat-card-subtitle>
+        </mat-card-header>
+        <mat-card-content>
+          <vd-chart [options]="c.options" [height]="200" />
+        </mat-card-content>
+      </mat-card>
+    } @empty {
+      <p class="waiting">Графикони се попуњавају како стижу нова очитавања.</p>
+    }
+  </section>
+}
