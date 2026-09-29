@@ -83,11 +83,7 @@ public sealed class StackFixture : IAsyncLifetime
         builder.Services.AddTelemetryIngestion(builder.Configuration);
         IHost host = builder.Build();
 
-        using (IServiceScope scope = host.Services.CreateScope())
-        {
-            await scope.ServiceProvider.GetRequiredService<TelemetryDbInitializer>().InitializeAsync(CancellationToken.None);
-        }
-
+        await host.Services.InitializeSchemasAsync(CancellationToken.None);
         await host.StartAsync();
         return host;
     }

@@ -34,10 +34,12 @@ public static class MessagingServiceCollectionExtensions
 
         services.AddMassTransit(bus =>
         {
-            // Queue names: "decode-raw-frames", "persist-decoded-signals", errors in "<name>_error".
+            // Queue names: "decode-raw-frames", "persist-decoded-signals", "record-settlement",
+            // errors in "<name>_error".
             bus.SetKebabCaseEndpointNameFormatter();
             bus.AddConsumer<DecodeRawFramesConsumer, DecodeRawFramesConsumerDefinition>();
             bus.AddConsumer<PersistDecodedSignalsConsumer, PersistDecodedSignalsConsumerDefinition>();
+            bus.AddConsumer<RecordSettlementConsumer>();
 
             bus.UsingRabbitMq((context, cfg) =>
             {

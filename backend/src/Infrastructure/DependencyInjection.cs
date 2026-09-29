@@ -3,8 +3,10 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using VehicleDiagnostics.Application.Abstractions;
+using VehicleDiagnostics.Application.Analytics;
 using VehicleDiagnostics.Application.SignalDecoding;
 using VehicleDiagnostics.Application.Telemetry;
+using VehicleDiagnostics.Infrastructure.Analytics;
 using VehicleDiagnostics.Infrastructure.Events;
 using VehicleDiagnostics.Infrastructure.Health;
 using VehicleDiagnostics.Infrastructure.Messaging;
@@ -42,6 +44,13 @@ public static class DependencyInjection
 
         // Measurement: every received message is settled once, for the Analytics context.
         services.AddScoped<IMessageSettlementReporter, MassTransitSettlementReporter>();
+
+        // Analytics context: its own schema on the shared instance (architecture.md §5). Registered
+        // with the bus, because the bus hosts its consumer.
+        services.AddDbContext<AnalyticsDbContext>(options => options.UseNpgsql(connectionString));
+        services.AddScoped<AnalyticsDbInitializer>();
+        services.AddScoped<IMessageLogRepository, PostgresMessageLogRepository>();
+        services.AddScoped<IRecordSettlement, RecordSettlement>();
         services.AddInternalBus(configuration);
 
         services.Configure<MqttIngestOptions>(configuration.GetSection("Mqtt"));
