@@ -27,6 +27,8 @@ public sealed class TelemetryDbInitializer(TelemetryDbContext context)
         );
 
         SELECT create_hypertable('telemetry.signal_readings', 'timestamp_device', if_not_exists => TRUE);
+        CREATE INDEX IF NOT EXISTS signal_readings_device_signal_time
+            ON telemetry.signal_readings (device_id, signal_name, timestamp_device DESC);
         """;
 
     public async Task InitializeAsync(CancellationToken cancellationToken)

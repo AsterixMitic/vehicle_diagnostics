@@ -32,6 +32,7 @@ public static class DependencyInjection
         services.AddDbContext<TelemetryDbContext>(options => options.UseNpgsql(connectionString));
         services.AddScoped<TelemetryDbInitializer>();
         services.AddScoped<ITelemetryRepository, PostgresTelemetryRepository>();
+        services.AddScoped<ITelemetryQueries, TimescaleTelemetryQueries>();
         services.AddScoped<IIngestTelemetry, IngestTelemetry>();
         services.AddSingleton<IDomainEventPublisher, LoggingDomainEventPublisher>();
         services.TryAddSingleton(TimeProvider.System);
