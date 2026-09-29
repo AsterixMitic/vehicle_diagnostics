@@ -1,3 +1,5 @@
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
@@ -10,7 +12,11 @@ import { History } from './features/history/history';
 import { Live } from './features/live/live';
 
 describe('routes', () => {
-  beforeEach(() => TestBed.configureTestingModule({ providers: [provideRouter(routes)] }));
+  beforeEach(() =>
+    TestBed.configureTestingModule({
+      providers: [provideRouter(routes), provideHttpClient(), provideHttpClientTesting()],
+    }),
+  );
 
   // navigateByUrl with a component type fails the test if another component is activated.
 
@@ -40,7 +46,11 @@ describe('routes', () => {
 });
 
 describe('App shell', () => {
-  beforeEach(() => TestBed.configureTestingModule({ providers: [provideRouter(routes)] }));
+  beforeEach(() =>
+    TestBed.configureTestingModule({
+      providers: [provideRouter(routes), provideHttpClient(), provideHttpClientTesting()],
+    }),
+  );
 
   it('marks the current page in the navigation', async () => {
     const fixture = TestBed.createComponent(App);

@@ -6,10 +6,10 @@
 
 <vd-data-state
   [source]="devices"
-  [empty]="(devices.value() ?? []).length === 0"
+  [empty]="list().length === 0"
   emptyText="Ниједан уређај није слао податке у изабраном опсегу."
 >
-  <table mat-table [dataSource]="devices.value() ?? []">
+  <table mat-table [dataSource]="list()">
     <ng-container matColumnDef="device">
       <th mat-header-cell *matHeaderCellDef>Уређај</th>
       <td mat-cell *matCellDef="let d">{{ d.deviceId }}</td>

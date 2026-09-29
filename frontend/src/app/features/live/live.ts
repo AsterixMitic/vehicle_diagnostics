@@ -67,6 +67,11 @@ export class Live {
     return device ? ApiUrls.latestSignals(device) : undefined;
   });
 
+  /** A resource in error throws on `value()`; the error itself is shown by DataState. */
+  protected readonly deviceList = computed(() =>
+    this.devices.hasValue() ? this.devices.value() : [],
+  );
+
   protected readonly connectionText = computed(() => CONNECTION_TEXT[this.stream.connection()]);
 
   protected readonly cards = computed<readonly ValueCard[]>(() => {
@@ -104,7 +109,7 @@ export class Live {
 
     // Without a selection, pick the first device seen, keeping the choice in the URL.
     effect(() => {
-      const first = this.devices.hasValue() ? this.devices.value()[0] : undefined;
+      const first = this.deviceList()[0];
       if (!this.device() && first) {
         this.choose(first.deviceId, true);
       }

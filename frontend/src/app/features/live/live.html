@@ -2,13 +2,13 @@
   <h1>Уживо</h1>
   <vd-data-state
     [source]="devices"
-    [empty]="(devices.value() ?? []).length === 0"
+    [empty]="deviceList().length === 0"
     emptyText="Ниједан уређај није слао податке у последњих 15 минута."
   >
     <mat-form-field subscriptSizing="dynamic">
       <mat-label>Уређај</mat-label>
       <mat-select [value]="device()" (selectionChange)="choose($event.value)">
-        @for (d of devices.value() ?? []; track d.deviceId) {
+        @for (d of deviceList(); track d.deviceId) {
           <mat-option [value]="d.deviceId">{{ d.deviceId }} · {{ d.processingMode }}</mat-option>
         }
       </mat-select>

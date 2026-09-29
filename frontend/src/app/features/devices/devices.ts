@@ -38,6 +38,9 @@ export class Devices {
     return ApiUrls.devices(resolveRange(this.selection(), new Date()));
   });
 
+  /** A resource in error throws on `value()`; the error itself is shown by DataState. */
+  protected readonly list = computed(() => (this.devices.hasValue() ? this.devices.value() : []));
+
   protected readonly columns = ['device', 'vehicle', 'lastSeen', 'mode', 'links'];
   protected readonly formatDateTime = formatDateTime;
 
