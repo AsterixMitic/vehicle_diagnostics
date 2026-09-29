@@ -219,7 +219,7 @@ Ova sekcija mapira opšte arhitektonske principe na konkretne odluke projekta. S
 | Dapr | **Odbijeno** | Funkcionalno se preklapa sa MassTransit i Aspire; uvođenje bi značilo dve apstrakcije nad istim problemom |
 | Serverless / FaaS | **Odbijeno** | Sistem obrađuje stalan tok telemetrije; model kratkotrajnih funkcija sa hladnim startom je suprotan zahtevu za niskim i stabilnim kašnjenjem |
 | CoAP | **Odbijeno** | Jedan protokol ingestije znači jedno merenje. Uvođenje CoAP-a udvostručuje kombinacije eksperimenata bez doprinosa istraživačkom pitanju |
-| GraphQL | **Odbijeno** | Frontend nije doprinos rada; REST je dovoljan |
+| GraphQL | **Odbijeno** | Kontrolnoj tabli (ADR-0005) je dovoljan REST sa nekoliko upita po stranici |
 | XaaS apstrakcije (DaaS, MaaS, SaaS) | **Konceptualno, ne realizovano** | Obrađuju se u teorijskom poglavlju kao kontekst; realizacija ne donosi merljiv rezultat |
 | LoRaWAN / BLE / 6LoWPAN | **Van obima** | Sistem koristi WiFi; alternativni transporti pominju se kao pravac razvoja |
 
@@ -246,6 +246,7 @@ Ova sekcija mapira opšte arhitektonske principe na konkretne odluke projekta. S
 | Firmver (simulirani ECU) | C++, Arduino framework, MCP2515 biblioteka |
 | Backend runtime | .NET 10 (LTS), C# 14 |
 | Web API | ASP.NET Core 10 Minimal APIs |
+| Frontend (ADR-0005) | Angular 22, Angular Material, ECharts (ngx-echarts), Vitest; nginx u kontejneru |
 | API Gateway | YARP |
 | MQTT | MQTTnet |
 | Interni bus, saga, outbox | MassTransit nad RabbitMQ (Kafka kao alternativa) |
@@ -626,7 +627,8 @@ Osmatranje nije dodatak nego **merni instrument istraživanja**. Bez njega scena
 | Trasiranje | OpenTelemetry → Tempo | Putanja zahteva: uređaj → edge → oblak → nazad |
 | Metrike | OpenTelemetry → Prometheus / Mimir | Propusnost, kašnjenje po fazi, resursi, stopa grešaka |
 | Logovi | Serilog / `ILogger` → Loki | Strukturirani logovi sa `TraceId` korelacijom |
-| Vizuelizacija | Grafana | Kontrolne table sistema i virtuelna instrument tabla |
+| Vizuelizacija (operativna) | Grafana | Kontrolne table sistema: tragovi, metrike, logovi |
+| Vizuelizacija (evaluacija, ADR-0005) | Angular kontrolna tabla | Podaci uživo, istorija signala, poređenje režima P0–P3, CSV izvoz |
 
 ### Instrumentacija po slojevima
 
@@ -797,7 +799,7 @@ Sekcija 5 je formalni mehanizam za suzbijanje slučajne složenosti — ništa n
 - Ne implementira se DoIP — pominje se kao pravac razvoja.
 - Ne implementira se programiranje ECU-a (servisi `0x34`–`0x37`) osim kao opcioni prikaz nad simulatorom.
 - Ne radi se obrnuti inženjering proizvođačkih identifikatora.
-- Frontend se ne razvija kao samostalan doprinos.
+- Frontend se razvija samo kao klijent javnog API-ja za čitanje (ADR-0005): ne čita bazu i ne uvodi sopstvenu poslovnu logiku.
 - Odbijene tehnologije iz sekcije 5 ne ulaze u sistem ni „usput".
 
 ### Redosled obuzdavanja složenosti
