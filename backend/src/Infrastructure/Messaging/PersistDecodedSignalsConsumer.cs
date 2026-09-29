@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using MassTransit;
 using Microsoft.Extensions.Logging;
+using VehicleDiagnostics.Application.Abstractions;
 using VehicleDiagnostics.Application.Telemetry;
 using VehicleDiagnostics.Contracts.Internal;
 using VehicleDiagnostics.Infrastructure.Observability;
@@ -13,6 +14,7 @@ namespace VehicleDiagnostics.Infrastructure.Messaging;
 /// </summary>
 public sealed partial class PersistDecodedSignalsConsumer(
     IIngestTelemetry ingestTelemetry,
+    IMessageSettlementReporter settlementReporter,
     ILogger<PersistDecodedSignalsConsumer> logger) : IConsumer<SignalsDecoded>
 {
     public async Task Consume(ConsumeContext<SignalsDecoded> context)
@@ -50,6 +52,10 @@ public sealed partial class PersistDecodedSignalsConsumer(
             default:
                 break;
         }
+
+        ReceiptInfo? receipt = BusReceipt.From(message.ReceivedAt, message.PayloadBytes);
+        await settlementReporter.ReportAsync(IngestSettlement.From(raw, outcome, receipt), context.CancellationToken)
+            .ConfigureAwait(false);
     }
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Rejected decoded signals from {DeviceId} sequence {Sequence}: {Reason}")]

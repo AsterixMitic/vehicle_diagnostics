@@ -47,3 +47,23 @@ public interface IMessageSettlementReporter
 {
     Task ReportAsync(MessageSettlement settlement, CancellationToken cancellationToken);
 }
+
+/// <summary>Turns validation codes into the single reason a settlement carries.</summary>
+public static class SettlementReasons
+{
+    /// <summary>Longest reason the measurement store keeps.</summary>
+    public const int MaxLength = 64;
+
+    /// <summary>Distinct codes in first-seen order, joined with <c>+</c>, e.g. <c>required+invalid</c>.</summary>
+    public static string Join(IEnumerable<string> codes)
+    {
+        ArgumentNullException.ThrowIfNull(codes);
+        string joined = string.Join('+', codes.Where(c => !string.IsNullOrEmpty(c)).Distinct(StringComparer.Ordinal));
+        if (joined.Length == 0)
+        {
+            return "unspecified";
+        }
+
+        return joined.Length <= MaxLength ? joined : joined[..MaxLength];
+    }
+}

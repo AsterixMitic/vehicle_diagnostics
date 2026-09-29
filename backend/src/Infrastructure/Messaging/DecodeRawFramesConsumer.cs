@@ -12,6 +12,7 @@ namespace VehicleDiagnostics.Infrastructure.Messaging;
 /// <summary>Bus → Signal Decoding context: decode one raw envelope's frames.</summary>
 public sealed partial class DecodeRawFramesConsumer(
     IDecodeFrames decodeFrames,
+    IMessageSettlementReporter settlementReporter,
     ILogger<DecodeRawFramesConsumer> logger) : IConsumer<RawFramesReceived>
 {
     public async Task Consume(ConsumeContext<RawFramesReceived> context)
@@ -45,7 +46,8 @@ public sealed partial class DecodeRawFramesConsumer(
         }
 
         var input = new FramesToDecode(
-            message.DeviceId, message.VehicleId, message.Sequence, message.ProcessingMode, message.TimestampDevice, frames);
+            message.DeviceId, message.VehicleId, message.Sequence, message.ProcessingMode, message.TimestampDevice, frames,
+            BusReceipt.From(message.ReceivedAt, message.PayloadBytes));
         DecodeOutcome outcome = await decodeFrames.DecodeAsync(input, context.CancellationToken).ConfigureAwait(false);
 
         switch (outcome)
@@ -70,6 +72,13 @@ public sealed partial class DecodeRawFramesConsumer(
                 break;
             default:
                 break;
+        }
+
+        // An envelope decoding consumed without publishing readings is settled here; one that
+        // published readings is settled by the Telemetry context once they are persisted.
+        if (DecodeSettlement.From(input, outcome) is { } settlement)
+        {
+            await settlementReporter.ReportAsync(settlement, context.CancellationToken).ConfigureAwait(false);
         }
     }
 

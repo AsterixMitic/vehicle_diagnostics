@@ -39,6 +39,9 @@ public static class DependencyInjection
         services.AddScoped<IRawFramesPublisher, MassTransitRawFramesPublisher>();
         services.AddScoped<IDecodeFrames, DecodeFrames>();
         services.AddScoped<IDecodedSignalsPublisher, MassTransitDecodedSignalsPublisher>();
+
+        // Measurement: every received message is settled once, for the Analytics context.
+        services.AddScoped<IMessageSettlementReporter, MassTransitSettlementReporter>();
         services.AddInternalBus(configuration);
 
         services.Configure<MqttIngestOptions>(configuration.GetSection("Mqtt"));

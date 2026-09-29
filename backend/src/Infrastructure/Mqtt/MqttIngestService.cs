@@ -25,6 +25,7 @@ public sealed partial class MqttIngestService(
     IServiceScopeFactory scopeFactory,
     MqttConnectionState connectionState,
     IOptions<MqttIngestOptions> options,
+    TimeProvider timeProvider,
     ILogger<MqttIngestService> logger) : BackgroundService
 {
     private static readonly TimeSpan ReconnectProbeInterval = TimeSpan.FromSeconds(1);
@@ -96,9 +97,19 @@ public sealed partial class MqttIngestService(
 
     private async Task HandleMessageAsync(MqttApplicationMessageReceivedEventArgs args, CancellationToken cancellationToken)
     {
+        // Measured first, before any parsing: this is the moment the message reached the backend.
+        var receipt = new ReceiptInfo(timeProvider.GetUtcNow(), checked((int)args.ApplicationMessage.Payload.Length));
+        await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+        var message = new InboundMessage(
+            args.ApplicationMessage.Topic,
+            args.ApplicationMessage.Payload.ToArray(),
+            receipt,
+            scope.ServiceProvider,
+            scope.ServiceProvider.GetRequiredService<IMessageSettlementReporter>());
+
         try
         {
-            await ProcessMessageAsync(args, cancellationToken).ConfigureAwait(false);
+            await ProcessMessageAsync(message, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -107,51 +118,57 @@ public sealed partial class MqttIngestService(
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             IngestDiagnostics.CountRejected("unhandled_exception");
-            LogPoisonMessage(logger, args.ApplicationMessage.Topic, exception);
+            LogPoisonMessage(logger, message.Topic, exception);
+            // A topic that does not parse leaves both identifiers null, which is what gets settled.
+            bool attributed = TelemetryTopics.TryParseTelemetry(message.Topic, out string? vehicleId, out string? deviceId, out _);
+            await message.Reporter.ReportAsync(
+                MessageSettlement.RejectedAnonymous(
+                    "unhandled_exception", receipt, attributed ? deviceId : null, attributed ? vehicleId : null),
+                cancellationToken)
+                .ConfigureAwait(false);
         }
     }
 
-    private async Task ProcessMessageAsync(MqttApplicationMessageReceivedEventArgs args, CancellationToken cancellationToken)
+    private async Task ProcessMessageAsync(InboundMessage message, CancellationToken cancellationToken)
     {
-        string topic = args.ApplicationMessage.Topic;
-        byte[] payload = args.ApplicationMessage.Payload.ToArray();
-
         IngestDiagnostics.MessagesReceived.Add(1);
 
-        if (!TelemetryTopics.TryParseTelemetry(topic, out string? vehicleId, out string? deviceId, out TelemetrySubtype subtype))
+        if (!TelemetryTopics.TryParseTelemetry(message.Topic, out string? vehicleId, out string? deviceId, out TelemetrySubtype subtype))
         {
-            IngestDiagnostics.CountRejected("unknown_topic");
-            LogRejected(logger, topic, "unknown_topic");
+            await RejectAsync(message, "unknown_topic", null, null, cancellationToken).ConfigureAwait(false);
             return;
         }
 
         switch (subtype)
         {
             case TelemetrySubtype.Signals:
-                await ProcessSignalsAsync(topic, payload, vehicleId, deviceId, cancellationToken).ConfigureAwait(false);
+                await ProcessSignalsAsync(message, vehicleId, deviceId, cancellationToken).ConfigureAwait(false);
                 break;
             case TelemetrySubtype.Raw:
-                await ProcessRawAsync(topic, payload, vehicleId, deviceId, cancellationToken).ConfigureAwait(false);
+                await ProcessRawAsync(message, vehicleId, deviceId, cancellationToken).ConfigureAwait(false);
                 break;
             default:
-                IngestDiagnostics.CountRejected("unknown_topic");
+                await RejectAsync(message, "unknown_topic", deviceId, vehicleId, cancellationToken).ConfigureAwait(false);
                 break;
         }
     }
 
-    private async Task ProcessSignalsAsync(string topic, byte[] payload, string vehicleId, string deviceId, CancellationToken cancellationToken)
+    private async Task ProcessSignalsAsync(InboundMessage message, string vehicleId, string deviceId, CancellationToken cancellationToken)
     {
-        if (!EnvelopeSerializer.TryDeserialize(payload, out MessageEnvelope<SignalReadingsPayload>? envelope, out string? parseError))
+        string topic = message.Topic;
+        if (!EnvelopeSerializer.TryDeserialize(message.Payload, out MessageEnvelope<SignalReadingsPayload>? envelope, out string? parseError))
         {
-            IngestDiagnostics.CountRejected("malformed");
-            LogRejected(logger, topic, $"malformed: {parseError}");
+            await RejectAsync(message, "malformed", deviceId, vehicleId, cancellationToken, parseError).ConfigureAwait(false);
             return;
         }
 
         using Activity? receiveActivity = StartReceive(envelope, topic);
 
-        if (!Validate(envelope, topic, vehicleId, deviceId, EnvelopeValidator.Validate(envelope, vehicleId, deviceId), receiveActivity))
+        EnvelopeValidationResult validation = EnvelopeValidator.Validate(envelope, vehicleId, deviceId);
+        if (!Validate(topic, validation, receiveActivity))
         {
+            await message.Reporter.ReportAsync(RejectedEnvelope(envelope, validation, message.Receipt), cancellationToken)
+                .ConfigureAwait(false);
             return;
         }
 
@@ -163,8 +180,7 @@ public sealed partial class MqttIngestService(
             envelope.TimestampDevice,
             [.. envelope.Payload.Readings.Select(r => new RawSignalReading(r.Name, r.Value, r.Unit))]);
 
-        await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
-        var useCase = scope.ServiceProvider.GetRequiredService<IIngestTelemetry>();
+        var useCase = message.Services.GetRequiredService<IIngestTelemetry>();
         IngestOutcome outcome = await useCase.IngestAsync(raw, cancellationToken).ConfigureAwait(false);
 
         switch (outcome)
@@ -187,21 +203,27 @@ public sealed partial class MqttIngestService(
             default:
                 break;
         }
+
+        await message.Reporter.ReportAsync(IngestSettlement.From(raw, outcome, message.Receipt), cancellationToken)
+            .ConfigureAwait(false);
     }
 
-    private async Task ProcessRawAsync(string topic, byte[] payload, string vehicleId, string deviceId, CancellationToken cancellationToken)
+    private async Task ProcessRawAsync(InboundMessage message, string vehicleId, string deviceId, CancellationToken cancellationToken)
     {
-        if (!EnvelopeSerializer.TryDeserializeRaw(payload, out MessageEnvelope<RawFramesPayload>? envelope, out string? parseError))
+        string topic = message.Topic;
+        if (!EnvelopeSerializer.TryDeserializeRaw(message.Payload, out MessageEnvelope<RawFramesPayload>? envelope, out string? parseError))
         {
-            IngestDiagnostics.CountRejected("malformed");
-            LogRejected(logger, topic, $"malformed: {parseError}");
+            await RejectAsync(message, "malformed", deviceId, vehicleId, cancellationToken, parseError).ConfigureAwait(false);
             return;
         }
 
         using Activity? receiveActivity = StartReceive(envelope, topic);
 
-        if (!Validate(envelope, topic, vehicleId, deviceId, EnvelopeValidator.Validate(envelope, vehicleId, deviceId), receiveActivity))
+        EnvelopeValidationResult validation = EnvelopeValidator.Validate(envelope, vehicleId, deviceId);
+        if (!Validate(topic, validation, receiveActivity))
         {
+            await message.Reporter.ReportAsync(RejectedEnvelope(envelope, validation, message.Receipt), cancellationToken)
+                .ConfigureAwait(false);
             return;
         }
 
@@ -211,10 +233,10 @@ public sealed partial class MqttIngestService(
             envelope.Sequence,
             envelope.ProcessingMode,
             envelope.TimestampDevice,
-            [.. envelope.Payload.Frames.Select(f => new RawFrameData(f.CanId, f.IsExtended, Convert.FromHexString(f.Data)))]);
+            [.. envelope.Payload.Frames.Select(f => new RawFrameData(f.CanId, f.IsExtended, Convert.FromHexString(f.Data)))],
+            message.Receipt);
 
-        await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
-        var useCase = scope.ServiceProvider.GetRequiredService<IAcceptRawTelemetry>();
+        var useCase = message.Services.GetRequiredService<IAcceptRawTelemetry>();
         AcceptRawOutcome outcome = await useCase.AcceptAsync(frames, cancellationToken).ConfigureAwait(false);
 
         switch (outcome)
@@ -230,6 +252,8 @@ public sealed partial class MqttIngestService(
 
                 receiveActivity?.SetStatus(ActivityStatusCode.Error, "raw frames rejected");
                 LogRejected(logger, topic, string.Join("; ", rejected.Errors.Select(e => e.Message)));
+                await message.Reporter.ReportAsync(IngestSettlement.FromRejectedRaw(frames, rejected), cancellationToken)
+                    .ConfigureAwait(false);
                 break;
             default:
                 break;
@@ -257,17 +281,8 @@ public sealed partial class MqttIngestService(
         return activity;
     }
 
-    private bool Validate<TPayload>(
-        MessageEnvelope<TPayload> envelope,
-        string topic,
-        string vehicleId,
-        string deviceId,
-        EnvelopeValidationResult validation,
-        Activity? receiveActivity)
+    private bool Validate(string topic, EnvelopeValidationResult validation, Activity? receiveActivity)
     {
-        _ = envelope;
-        _ = vehicleId;
-        _ = deviceId;
         using (Activity? validateActivity = IngestDiagnostics.ActivitySource.StartActivity("ingest.validate"))
         {
             validateActivity?.SetTag("vehiclediagnostics.valid", validation.IsValid);
@@ -287,6 +302,44 @@ public sealed partial class MqttIngestService(
         LogRejected(logger, topic, string.Join("; ", validation.Errors.Select(e => e.Message)));
         return false;
     }
+
+    /// <summary>Counts, logs and settles a message rejected before an envelope could be read.</summary>
+    private async Task RejectAsync(
+        InboundMessage message,
+        string reason,
+        string? deviceId,
+        string? vehicleId,
+        CancellationToken cancellationToken,
+        string? detail = null)
+    {
+        IngestDiagnostics.CountRejected(reason);
+        LogRejected(logger, message.Topic, detail is null ? reason : $"{reason}: {detail}");
+        await message.Reporter.ReportAsync(
+            MessageSettlement.RejectedAnonymous(reason, message.Receipt, deviceId, vehicleId), cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>An envelope that parsed but failed validation, settled with the fields it carried.</summary>
+    private static MessageSettlement RejectedEnvelope<TPayload>(
+        MessageEnvelope<TPayload> envelope, EnvelopeValidationResult validation, ReceiptInfo receipt) =>
+        new(SettlementOutcome.Rejected,
+            SettlementReasons.Join(validation.Errors.Select(e => e.Code)),
+            envelope.DeviceId,
+            envelope.VehicleId,
+            envelope.Sequence,
+            envelope.ProcessingMode,
+            envelope.TimestampDevice == default ? null : envelope.TimestampDevice,
+            receipt,
+            null,
+            0);
+
+    /// <summary>One broker message and the per-message scope it is processed in.</summary>
+    private sealed record InboundMessage(
+        string Topic,
+        byte[] Payload,
+        ReceiptInfo Receipt,
+        IServiceProvider Services,
+        IMessageSettlementReporter Reporter);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Connected and subscribed to MQTT broker {Host}:{Port}")]
     private static partial void LogConnected(ILogger logger, string host, int port);

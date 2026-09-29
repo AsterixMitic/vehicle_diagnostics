@@ -35,6 +35,12 @@ public static class IngestDiagnostics
     public static readonly Counter<long> TraceContinuityLost =
         Meter.CreateCounter<long>("ingest.trace_continuity_lost", description: "Envelopes whose traceparent was malformed");
 
+    public static readonly Counter<long> SettlementsReported =
+        Meter.CreateCounter<long>("ingest.settlements.reported", description: "Settlements published for measurement, tagged by outcome");
+
+    public static readonly Counter<long> SettlementsFailed =
+        Meter.CreateCounter<long>("ingest.settlements.failed", description: "Settlements that could not be published; the measurement is lost, the message is not");
+
     public static void CountRejected(string reason) =>
         MessagesRejected.Add(1, new KeyValuePair<string, object?>("reason", reason));
 }
