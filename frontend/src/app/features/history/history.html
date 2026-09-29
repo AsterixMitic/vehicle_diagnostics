@@ -1,0 +1,64 @@
+<header class="heading">
+  <h1>Историја</h1>
+  <vd-range-picker [selection]="selection()" (selectionChange)="select($event)" />
+  <button mat-stroked-button type="button" (click)="refresh()">Освежи</button>
+</header>
+
+<div class="choices">
+  <vd-data-state
+    [source]="devices"
+    [empty]="deviceList().length === 0"
+    emptyText="Ниједан уређај није слао податке у изабраном опсегу."
+  >
+    <mat-form-field subscriptSizing="dynamic">
+      <mat-label>Уређај</mat-label>
+      <mat-select [value]="device()" (selectionChange)="chooseDevice($event.value)">
+        @for (d of deviceList(); track d.deviceId) {
+          <mat-option [value]="d.deviceId">{{ d.deviceId }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+  </vd-data-state>
+
+  @if (device()) {
+    <vd-data-state
+      [source]="signals"
+      [empty]="signalList().length === 0"
+      emptyText="Уређај нема сачуваних сигнала."
+    >
+      <mat-form-field subscriptSizing="dynamic" class="signal">
+        <mat-label>Сигнал</mat-label>
+        <mat-select [value]="signal()" (selectionChange)="chooseSignal($event.value)">
+          @for (s of signalList(); track s.name) {
+            <mat-option [value]="s.name">{{ signalName(s.name) }} · {{ s.name }}</mat-option>
+          }
+        </mat-select>
+      </mat-form-field>
+    </vd-data-state>
+  }
+</div>
+
+@if (device() && signal()) {
+  <mat-card appearance="outlined">
+    <mat-card-header>
+      <mat-card-title>{{ signalLabel() }}</mat-card-title>
+      <mat-card-subtitle>
+        {{ signal() }}
+        @if (bucketText()) {
+          · интервал агрегације {{ bucketText() }}
+        }
+      </mat-card-subtitle>
+    </mat-card-header>
+    <mat-card-content>
+      <vd-data-state
+        [source]="series"
+        [empty]="points().length === 0"
+        emptyText="Нема узорака овог сигнала у изабраном опсегу."
+      >
+        @if (options(); as chartOptions) {
+          <vd-chart [options]="chartOptions" [height]="360" />
+        }
+      </vd-data-state>
+    </mat-card-content>
+  </mat-card>
+}
