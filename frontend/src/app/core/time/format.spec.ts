@@ -3,6 +3,7 @@ import {
   formatBucket,
   formatBytes,
   formatCount,
+  formatAxisNumber,
   formatDateTime,
   formatLatency,
   formatRate,
@@ -31,6 +32,11 @@ describe('format', () => {
   it('keeps physical values short', () => {
     expect(formatValue(1726.25)).toBe('1.726,25');
     expect(formatValue(60)).toBe('60');
+  });
+
+  it('writes axis ticks in Serbian notation', () => {
+    expect(formatAxisNumber(5200)).toBe('5.200');
+    expect(formatAxisNumber(0.8)).toBe('0,8');
   });
 
   it('formats times in the given zone', () => {

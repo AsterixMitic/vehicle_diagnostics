@@ -40,6 +40,11 @@ export function formatValue(value: number | null | undefined): string {
   return new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 2 }).format(value);
 }
 
+/** An axis tick: grouped thousands and up to two decimals, e.g. `5.200` or `0,8`. */
+export function formatAxisNumber(value: number): string {
+  return new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 2 }).format(value);
+}
+
 export function formatDateTime(iso: string | null | undefined, timeZone?: string): string {
   const date = toDate(iso);
   return date

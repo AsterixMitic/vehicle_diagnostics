@@ -1,6 +1,7 @@
 import { DestroyRef, inject, Injectable, signal } from '@angular/core';
 
 import { EvaluationMode } from '../../core/api/models';
+import { formatAxisNumber } from '../../core/time/format';
 
 /**
  * Chart colors (design D6). Mode hues are fixed per mode, never cycled, so P2 is the same color
@@ -103,7 +104,8 @@ export function valueAxis(scheme: Scheme, name?: string) {
     name,
     nameTextStyle: { color: chrome.muted, align: 'left' as const },
     axisLine: { show: false },
-    axisLabel: { color: chrome.muted },
+    // Ticks in the thesis's notation (5.200, 0,8), like every other number on the page.
+    axisLabel: { color: chrome.muted, formatter: formatAxisNumber },
     splitLine: { lineStyle: { color: chrome.grid, width: 1, type: 'solid' as const } },
   };
 }
