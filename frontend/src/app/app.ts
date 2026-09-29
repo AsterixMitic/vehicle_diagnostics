@@ -1,12 +1,25 @@
-import { Component, signal } from '@angular/core';
-import { RouterOutlet } from '@angular/router';
+import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { MatButtonModule } from '@angular/material/button';
+import { MatToolbarModule } from '@angular/material/toolbar';
+import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+
+interface NavItem {
+  readonly path: string;
+  readonly label: string;
+}
 
 @Component({
-  imports: [RouterOutlet],
   selector: 'vd-root',
-  styleUrl: './app.scss',
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, MatToolbarModule, MatButtonModule],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './app.html',
+  styleUrl: './app.scss',
 })
 export class App {
-  protected readonly title = signal('vehicle-dashboard');
+  protected readonly nav: readonly NavItem[] = [
+    { path: '/live', label: 'Уживо' },
+    { path: '/history', label: 'Историја' },
+    { path: '/evaluation', label: 'Евалуација' },
+    { path: '/devices', label: 'Уређаји' },
+  ];
 }

@@ -1,0 +1,33 @@
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  gap: 24px;
+  flex-wrap: wrap;
+  height: auto;
+  min-height: 64px;
+  background: var(--mat-sys-surface-container);
+  color: var(--mat-sys-on-surface);
+}
+
+.brand {
+  font: var(--mat-sys-title-large);
+}
+
+nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.active {
+  background: var(--mat-sys-secondary-container);
+  color: var(--mat-sys-on-secondary-container);
+}
+
+.page {
+  box-sizing: border-box;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
