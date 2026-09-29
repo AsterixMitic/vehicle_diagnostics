@@ -1,6 +1,8 @@
 using System.Text;
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -8,6 +10,7 @@ using MQTTnet;
 using Npgsql;
 using Testcontainers.PostgreSql;
 using Testcontainers.RabbitMq;
+using VehicleDiagnostics.Api.Endpoints;
 using VehicleDiagnostics.Infrastructure;
 using VehicleDiagnostics.Infrastructure.Messaging;
 using VehicleDiagnostics.Infrastructure.Telemetry;
@@ -63,6 +66,36 @@ public sealed class StackFixture : IAsyncLifetime
     public async Task<IHost> StartHostAsync(string clientId, IDictionary<string, string?>? extraConfiguration = null)
     {
         HostApplicationBuilder builder = Host.CreateApplicationBuilder();
+        builder.Configuration.AddInMemoryCollection(Configuration(clientId, extraConfiguration));
+        builder.Services.AddTelemetryIngestion(builder.Configuration);
+        IHost host = builder.Build();
+
+        await host.Services.InitializeSchemasAsync(CancellationToken.None);
+        await host.StartAsync();
+        return host;
+    }
+
+    /// <summary>
+    /// The Api host itself, endpoints included, on real Kestrel at a random loopback port. Its
+    /// base address is in <see cref="WebApplication.Urls"/> once started.
+    /// </summary>
+    public async Task<WebApplication> StartApiAsync(string clientId)
+    {
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Configuration.AddInMemoryCollection(Configuration(clientId, null));
+        builder.Services.AddTelemetryIngestion(builder.Configuration);
+        builder.Services.AddProblemDetails();
+        WebApplication app = builder.Build();
+        app.MapVehicleDiagnosticsApi();
+
+        await app.Services.InitializeSchemasAsync(CancellationToken.None);
+        await app.StartAsync();
+        return app;
+    }
+
+    private Dictionary<string, string?> Configuration(string clientId, IDictionary<string, string?>? extraConfiguration)
+    {
         var configuration = new Dictionary<string, string?>
         {
             [$"ConnectionStrings:{DependencyInjection.TelemetryDbConnectionName}"] = Database.GetConnectionString(),
@@ -79,13 +112,7 @@ public sealed class StackFixture : IAsyncLifetime
             }
         }
 
-        builder.Configuration.AddInMemoryCollection(configuration);
-        builder.Services.AddTelemetryIngestion(builder.Configuration);
-        IHost host = builder.Build();
-
-        await host.Services.InitializeSchemasAsync(CancellationToken.None);
-        await host.StartAsync();
-        return host;
+        return configuration;
     }
 
     public async Task<IMqttClient> ConnectPublisherAsync(string clientId)
