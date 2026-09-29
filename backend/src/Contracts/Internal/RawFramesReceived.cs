@@ -7,7 +7,11 @@ namespace VehicleDiagnostics.Contracts.Internal;
 /// </summary>
 public sealed record RawFramesReceived
 {
-    public const int Version = 1;
+    /// <summary>
+    /// Version 2 added <see cref="ReceivedAt"/> and <see cref="PayloadBytes"/>; both are absent
+    /// (null) in a version-1 message.
+    /// </summary>
+    public const int Version = 2;
 
     public required string DeviceId { get; init; }
 
@@ -20,4 +24,10 @@ public sealed record RawFramesReceived
     public required string ProcessingMode { get; init; }
 
     public required IReadOnlyList<CanFrameDto> Frames { get; init; }
+
+    /// <summary>When the backend received the original envelope from the broker.</summary>
+    public DateTimeOffset? ReceivedAt { get; init; }
+
+    /// <summary>Size in bytes of the original envelope as received.</summary>
+    public int? PayloadBytes { get; init; }
 }

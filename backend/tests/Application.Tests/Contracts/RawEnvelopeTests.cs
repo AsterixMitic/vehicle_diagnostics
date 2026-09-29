@@ -137,4 +137,73 @@ public sealed class RawEnvelopeTests
         JsonSerializer.Deserialize<RawFramesReceived>(JsonSerializer.Serialize(received)).Should().BeEquivalentTo(received);
         JsonSerializer.Deserialize<SignalsDecoded>(JsonSerializer.Serialize(decoded)).Should().BeEquivalentTo(decoded);
     }
+
+    [Fact]
+    public void Version_2_receipt_fields_round_trip()
+    {
+        var received = new RawFramesReceived
+        {
+            DeviceId = "esp32-01",
+            VehicleId = "car-01",
+            Sequence = 7,
+            TimestampDevice = DateTimeOffset.UnixEpoch,
+            ProcessingMode = "P0",
+            Frames = [new CanFrameDto { CanId = 0x7E8, Data = "04410C1AF8" }],
+            ReceivedAt = DateTimeOffset.UnixEpoch.AddMilliseconds(12),
+            PayloadBytes = 312,
+        };
+
+        RawFramesReceived? back = JsonSerializer.Deserialize<RawFramesReceived>(JsonSerializer.Serialize(received));
+
+        back!.ReceivedAt.Should().Be(received.ReceivedAt);
+        back.PayloadBytes.Should().Be(312);
+        RawFramesReceived.Version.Should().Be(2);
+        SignalsDecoded.Version.Should().Be(2);
+    }
+
+    [Fact]
+    public void Version_1_messages_without_receipt_fields_still_deserialize()
+    {
+        const string v1 = """
+            {"DeviceId":"esp32-01","VehicleId":"car-01","Sequence":7,"TimestampDevice":"1970-01-01T00:00:00+00:00",
+             "ProcessingMode":"P0","Readings":[{"Name":"engine_rpm","Value":1726,"Unit":"rpm"}]}
+            """;
+
+        SignalsDecoded? decoded = JsonSerializer.Deserialize<SignalsDecoded>(v1);
+
+        decoded!.Readings.Should().ContainSingle();
+        decoded.ReceivedAt.Should().BeNull();
+        decoded.PayloadBytes.Should().BeNull();
+    }
+
+    [Fact]
+    public void Settlement_round_trips_with_optional_identity()
+    {
+        var persisted = new TelemetryMessageSettled
+        {
+            SettlementId = Guid.NewGuid(),
+            Outcome = SettlementOutcomes.Persisted,
+            DeviceId = "esp32-01",
+            VehicleId = "car-01",
+            Sequence = 7,
+            ProcessingMode = "P2",
+            TimestampDevice = DateTimeOffset.UnixEpoch,
+            ReceivedAt = DateTimeOffset.UnixEpoch.AddMilliseconds(15),
+            PersistedAt = DateTimeOffset.UnixEpoch.AddMilliseconds(21),
+            PayloadBytes = 280,
+            ReadingCount = 3,
+        };
+        var anonymous = new TelemetryMessageSettled
+        {
+            SettlementId = Guid.NewGuid(),
+            Outcome = SettlementOutcomes.Rejected,
+            RejectReason = "unknown_topic",
+            ReceivedAt = DateTimeOffset.UnixEpoch,
+            PayloadBytes = 40,
+            ReadingCount = 0,
+        };
+
+        JsonSerializer.Deserialize<TelemetryMessageSettled>(JsonSerializer.Serialize(persisted)).Should().BeEquivalentTo(persisted);
+        JsonSerializer.Deserialize<TelemetryMessageSettled>(JsonSerializer.Serialize(anonymous)).Should().BeEquivalentTo(anonymous);
+    }
 }
