@@ -14,11 +14,12 @@ public sealed class IngestTelemetryTests
 
     private readonly FakeRepository _repository = new();
     private readonly FakePublisher _publisher = new();
+    private readonly FakeTimeProvider _time = new(Now);
     private readonly IngestTelemetry _useCase;
 
     public IngestTelemetryTests()
     {
-        _useCase = new IngestTelemetry(_repository, _publisher, new FakeTimeProvider(Now));
+        _useCase = new IngestTelemetry(_repository, _publisher, _time);
     }
 
     private static RawTelemetry ValidTelemetry(long sequence = 1) => new(
@@ -38,6 +39,18 @@ public sealed class IngestTelemetryTests
 
         _repository.Persisted.Should().ContainSingle().Which.Should().BeSameAs(accepted.Event);
         _publisher.Published.Should().ContainSingle().Which.Should().BeSameAs(accepted.Event);
+    }
+
+    [Fact]
+    public async Task Persist_time_is_read_after_the_insert_returns()
+    {
+        _repository.OnPersist = () => _time.Advance(TimeSpan.FromMilliseconds(6));
+
+        IngestOutcome outcome = await _useCase.IngestAsync(ValidTelemetry(), CancellationToken.None);
+
+        var accepted = outcome.Should().BeOfType<IngestOutcome.Accepted>().Subject;
+        accepted.Event.OccurredAt.Should().Be(Now);
+        accepted.PersistedAt.Should().Be(Now.AddMilliseconds(6));
     }
 
     [Theory]
@@ -107,8 +120,11 @@ public sealed class IngestTelemetryTests
 
         public PersistResult NextResult { get; set; } = PersistResult.Inserted;
 
+        public Action? OnPersist { get; set; }
+
         public Task<PersistResult> PersistAsync(TelemetryReceived telemetry, CancellationToken cancellationToken)
         {
+            OnPersist?.Invoke();
             if (NextResult == PersistResult.Inserted)
             {
                 Persisted.Add(telemetry);

@@ -10,7 +10,8 @@ public sealed record RawTelemetryFrames(
     long Sequence,
     string ProcessingMode,
     DateTimeOffset TimestampDevice,
-    IReadOnlyList<RawFrameData> Frames);
+    IReadOnlyList<RawFrameData> Frames,
+    ReceiptInfo? Receipt = null);
 
 /// <summary>A raw-frames message the Telemetry context accepted and hands to decoding.</summary>
 public sealed record RawFramesAccepted(
@@ -19,7 +20,8 @@ public sealed record RawFramesAccepted(
     long Sequence,
     ProcessingMode ProcessingMode,
     DateTimeOffset TimestampDevice,
-    IReadOnlyList<RawFrameData> Frames);
+    IReadOnlyList<RawFrameData> Frames,
+    ReceiptInfo? Receipt);
 
 /// <summary>Outbound port: hand accepted raw frames to the Signal Decoding context over the bus.</summary>
 public interface IRawFramesPublisher
@@ -89,7 +91,7 @@ public sealed class AcceptRawTelemetry(IRawFramesPublisher publisher) : IAcceptR
         }
 
         var accepted = new RawFramesAccepted(
-            deviceId.Value, vehicleId.Value, telemetry.Sequence, mode, telemetry.TimestampDevice, telemetry.Frames);
+            deviceId.Value, vehicleId.Value, telemetry.Sequence, mode, telemetry.TimestampDevice, telemetry.Frames, telemetry.Receipt);
         await publisher.PublishAsync(accepted, cancellationToken).ConfigureAwait(false);
         return new AcceptRawOutcome.Accepted(accepted);
     }

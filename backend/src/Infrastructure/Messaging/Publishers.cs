@@ -22,6 +22,8 @@ public sealed class MassTransitRawFramesPublisher(IPublishEndpoint publishEndpoi
                 TimestampDevice = accepted.TimestampDevice,
                 ProcessingMode = accepted.ProcessingMode.ToString(),
                 Frames = [.. accepted.Frames.Select(ToDto)],
+                ReceivedAt = accepted.Receipt?.ReceivedAt,
+                PayloadBytes = accepted.Receipt?.PayloadBytes,
             },
             cancellationToken);
     }
@@ -54,6 +56,8 @@ public sealed class MassTransitDecodedSignalsPublisher(IPublishEndpoint publishE
                     Value = s.Value,
                     Unit = s.Unit,
                 })],
+                ReceivedAt = batch.Receipt?.ReceivedAt,
+                PayloadBytes = batch.Receipt?.PayloadBytes,
             },
             cancellationToken);
     }

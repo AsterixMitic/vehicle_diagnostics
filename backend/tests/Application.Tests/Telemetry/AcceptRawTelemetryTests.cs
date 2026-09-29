@@ -32,6 +32,16 @@ public sealed class AcceptRawTelemetryTests
         _publisher.Published.Should().ContainSingle().Which.Should().BeSameAs(message);
     }
 
+    [Fact]
+    public async Task Receipt_of_the_original_envelope_is_forwarded()
+    {
+        var receipt = new ReceiptInfo(new DateTimeOffset(2026, 9, 16, 10, 0, 0, 25, TimeSpan.Zero), 318);
+
+        AcceptRawOutcome outcome = await _useCase.AcceptAsync(Valid() with { Receipt = receipt }, CancellationToken.None);
+
+        outcome.Should().BeOfType<AcceptRawOutcome.Accepted>().Which.Message.Receipt.Should().Be(receipt);
+    }
+
     [Theory]
     [InlineData("", "car-01", "P0", 1)]
     [InlineData("esp32-01", "bad id", "P0", 1)]

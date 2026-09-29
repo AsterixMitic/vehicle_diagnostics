@@ -21,6 +21,17 @@ public sealed class DecodeFramesTests
         "esp32-01", "car-01", 5, "P0", new DateTimeOffset(2026, 9, 16, 10, 0, 0, TimeSpan.Zero), frames);
 
     [Fact]
+    public async Task Receipt_of_the_original_envelope_travels_with_the_batch()
+    {
+        var receipt = new ReceiptInfo(DateTimeOffset.UnixEpoch.AddMilliseconds(9), 290);
+
+        await _useCase.DecodeAsync(
+            Input(Frame(0x7E8, 0x04, 0x41, 0x0C, 0x1A, 0xF8)) with { Receipt = receipt }, CancellationToken.None);
+
+        _publisher.Published.Should().ContainSingle().Which.Receipt.Should().Be(receipt);
+    }
+
+    [Fact]
     public async Task Mixed_envelope_decodes_the_decodable_frames_and_counts_the_rest()
     {
         FramesToDecode input = Input(

@@ -75,7 +75,8 @@ public sealed class IngestTelemetry(
             return new IngestOutcome.Duplicate();
         }
 
+        DateTimeOffset persistedAt = timeProvider.GetUtcNow();
         await eventPublisher.PublishAsync(@event, cancellationToken).ConfigureAwait(false);
-        return new IngestOutcome.Accepted(@event);
+        return new IngestOutcome.Accepted(@event, persistedAt);
     }
 }

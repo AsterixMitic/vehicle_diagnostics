@@ -11,7 +11,8 @@ public sealed record FramesToDecode(
     long Sequence,
     string ProcessingMode,
     DateTimeOffset TimestampDevice,
-    IReadOnlyList<RawFrameData> Frames);
+    IReadOnlyList<RawFrameData> Frames,
+    ReceiptInfo? Receipt = null);
 
 /// <summary>Readings decoded from one envelope, ready to be handed back to the Telemetry context.</summary>
 public sealed record DecodedSignalsBatch(
@@ -20,7 +21,8 @@ public sealed record DecodedSignalsBatch(
     long Sequence,
     ProcessingMode ProcessingMode,
     DateTimeOffset TimestampDevice,
-    IReadOnlyList<DecodedSignal> Signals);
+    IReadOnlyList<DecodedSignal> Signals,
+    ReceiptInfo? Receipt);
 
 /// <summary>Outbound port: publish decoded readings for the Telemetry context to persist.</summary>
 public interface IDecodedSignalsPublisher
@@ -121,7 +123,7 @@ public sealed class DecodeFrames(IDecodedSignalsPublisher publisher) : IDecodeFr
         if (published)
         {
             var batch = new DecodedSignalsBatch(
-                deviceId.Value, vehicleId.Value, input.Sequence, mode, input.TimestampDevice, signals);
+                deviceId.Value, vehicleId.Value, input.Sequence, mode, input.TimestampDevice, signals, input.Receipt);
             await publisher.PublishAsync(batch, cancellationToken).ConfigureAwait(false);
         }
 

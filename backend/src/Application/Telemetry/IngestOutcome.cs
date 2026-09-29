@@ -11,7 +11,8 @@ public abstract record IngestOutcome
     }
 
     /// <summary>Readings validated and durably stored; the domain event was published.</summary>
-    public sealed record Accepted(TelemetryReceived Event) : IngestOutcome;
+    /// <param name="PersistedAt">Read after the insert returned, so the insert itself counts toward end-to-end latency.</param>
+    public sealed record Accepted(TelemetryReceived Event, DateTimeOffset PersistedAt) : IngestOutcome;
 
     /// <summary>Redelivery of an already-persisted message; nothing stored, not an error.</summary>
     public sealed record Duplicate : IngestOutcome;
