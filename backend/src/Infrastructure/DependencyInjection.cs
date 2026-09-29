@@ -34,7 +34,12 @@ public static class DependencyInjection
         services.AddScoped<ITelemetryRepository, PostgresTelemetryRepository>();
         services.AddScoped<ITelemetryQueries, TimescaleTelemetryQueries>();
         services.AddScoped<IIngestTelemetry, IngestTelemetry>();
-        services.AddSingleton<IDomainEventPublisher, LoggingDomainEventPublisher>();
+        // Domain events are logged and fanned out to live subscribers (SSE).
+        services.AddSingleton<LoggingDomainEventPublisher>();
+        services.AddSingleton<LiveReadingsHub>();
+        services.AddSingleton<ILiveTelemetryFeed>(sp => sp.GetRequiredService<LiveReadingsHub>());
+        services.AddSingleton<IDomainEventPublisher>(sp => new CompositeDomainEventPublisher(
+            [sp.GetRequiredService<LoggingDomainEventPublisher>(), sp.GetRequiredService<LiveReadingsHub>()]));
         services.TryAddSingleton(TimeProvider.System);
 
         // P0 path: Telemetry accepts raw frames → bus → Signal Decoding decodes → bus → Telemetry persists.
