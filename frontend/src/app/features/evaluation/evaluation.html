@@ -1,0 +1,143 @@
+<header class="heading">
+  <h1>Евалуација</h1>
+  <vd-range-picker [selection]="selection()" (selectionChange)="select($event)" />
+  <button mat-stroked-button type="button" (click)="refresh()">Освежи</button>
+  <a mat-flat-button [href]="exportUrl()" download>Преузми CSV</a>
+</header>
+
+<mat-card appearance="outlined" class="block">
+  <mat-card-header>
+    <mat-card-title>Поређење режима обраде</mat-card-title>
+    <mat-card-subtitle>{{ rangeText() }}</mat-card-subtitle>
+  </mat-card-header>
+  <mat-card-content>
+    <vd-data-state
+      [source]="summary"
+      [empty]="modes().length === 0"
+      emptyText="У изабраном опсегу није примљена ниједна порука."
+    >
+      <div class="table-scroll">
+        <table class="summary">
+          <thead>
+            <tr>
+              <th rowspan="2" scope="col">Режим</th>
+              <th colspan="5" scope="colgroup">Поруке</th>
+              <th colspan="3" scope="colgroup">Проток</th>
+              <th colspan="3" scope="colgroup">Крај–крај [ms]</th>
+              <th colspan="3" scope="colgroup">Пренос [ms]</th>
+              <th colspan="3" scope="colgroup">Backend [ms]</th>
+            </tr>
+            <tr>
+              <th scope="col">примљено</th>
+              <th scope="col">уписано</th>
+              <th scope="col">дупликати</th>
+              <th scope="col">одбачено</th>
+              <th scope="col">изгубљено</th>
+              <th scope="col">msg/s</th>
+              <th scope="col">B/s</th>
+              <th scope="col">B/поруци</th>
+              @for (group of [1, 2, 3]; track group) {
+                <th scope="col">p50</th>
+                <th scope="col">p95</th>
+                <th scope="col">p99</th>
+              }
+            </tr>
+          </thead>
+          <tbody>
+            @for (m of modes(); track m.mode) {
+              <tr>
+                <th scope="row"><vd-mode-badge [mode]="m.mode" /></th>
+                <td>{{ format.count(m.received) }}</td>
+                <td>{{ format.count(m.persisted) }}</td>
+                <td>{{ format.count(m.duplicates) }}</td>
+                <td>{{ format.count(m.rejected) }}</td>
+                <td>{{ format.count(m.lost) }}</td>
+                <td>{{ format.rate(m.messagesPerSecond) }}</td>
+                <td>{{ format.rate(m.bytesPerSecond) }}</td>
+                <td>{{ format.bytes(m.meanPayloadBytes) }}</td>
+                @for (latency of [m.endToEnd, m.transport, m.backend]; track $index) {
+                  <td>{{ format.latency(latency?.p50) }}</td>
+                  <td>{{ format.latency(latency?.p95) }}</td>
+                  <td>{{ format.latency(latency?.p99) }}</td>
+                }
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </vd-data-state>
+  </mat-card-content>
+</mat-card>
+
+<div class="grid">
+  <mat-card appearance="outlined">
+    <mat-card-header>
+      <mat-card-title>Перцентили кашњења</mat-card-title>
+    </mat-card-header>
+    <mat-card-content>
+      <mat-button-toggle-group
+        [value]="latencyKind()"
+        (change)="latencyKind.set($event.value)"
+        aria-label="Врста кашњења"
+        hideSingleSelectionIndicator
+      >
+        @for (kind of latencyKinds; track kind.value) {
+          <mat-button-toggle [value]="kind.value">{{ kind.label }}</mat-button-toggle>
+        }
+      </mat-button-toggle-group>
+      <vd-data-state [source]="summary" [empty]="modes().length === 0">
+        <vd-chart [options]="latencyChart()" [height]="280" />
+      </vd-data-state>
+    </mat-card-content>
+  </mat-card>
+
+  @for (chart of timeCharts(); track chart.title) {
+    <mat-card appearance="outlined">
+      <mat-card-header>
+        <mat-card-title>{{ chart.title }}</mat-card-title>
+        @if (bucketText()) {
+          <mat-card-subtitle>интервал {{ bucketText() }}</mat-card-subtitle>
+        }
+      </mat-card-header>
+      <mat-card-content>
+        <vd-data-state [source]="series" [empty]="modes().length === 0">
+          <vd-chart [options]="chart.options" [height]="280" />
+        </vd-data-state>
+      </mat-card-content>
+    </mat-card>
+  }
+</div>
+
+<mat-card appearance="outlined" class="block">
+  <mat-card-header>
+    <mat-card-title>Одбачене поруке</mat-card-title>
+  </mat-card-header>
+  <mat-card-content>
+    <vd-data-state
+      [source]="summary"
+      [empty]="rejections().length === 0"
+      emptyText="Ниједна порука није одбачена."
+    >
+      <table class="rejections">
+        <thead>
+          <tr>
+            <th scope="col">Режим</th>
+            <th scope="col">Разлог</th>
+            <th scope="col">Број</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (r of rejections(); track r.mode + r.reason) {
+            <tr>
+              <td><vd-mode-badge [mode]="r.mode" /></td>
+              <td>
+                <code>{{ r.reason }}</code>
+              </td>
+              <td>{{ format.count(r.count) }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </vd-data-state>
+  </mat-card-content>
+</mat-card>

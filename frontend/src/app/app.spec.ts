@@ -6,17 +6,20 @@ import { RouterTestingHarness } from '@angular/router/testing';
 
 import { App } from './app';
 import { routes } from './app.routes';
+import { Chart } from './shared/charts/chart';
 import { Devices } from './features/devices/devices';
 import { Evaluation } from './features/evaluation/evaluation';
 import { History } from './features/history/history';
 import { Live } from './features/live/live';
 
 describe('routes', () => {
-  beforeEach(() =>
+  beforeEach(() => {
     TestBed.configureTestingModule({
       providers: [provideRouter(routes), provideHttpClient(), provideHttpClientTesting()],
-    }),
-  );
+    });
+    // Charts draw on a canvas the test DOM does not have.
+    TestBed.overrideComponent(Chart, { set: { template: '', imports: [] } });
+  });
 
   // navigateByUrl with a component type fails the test if another component is activated.
 
@@ -46,16 +49,20 @@ describe('routes', () => {
 });
 
 describe('App shell', () => {
-  beforeEach(() =>
+  beforeEach(() => {
     TestBed.configureTestingModule({
       providers: [provideRouter(routes), provideHttpClient(), provideHttpClientTesting()],
-    }),
-  );
+    });
+    // Charts draw on a canvas the test DOM does not have.
+    TestBed.overrideComponent(Chart, { set: { template: '', imports: [] } });
+  });
 
   it('marks the current page in the navigation', async () => {
     const fixture = TestBed.createComponent(App);
+    // The active link depends on the router alone, so the page's own requests stay pending;
+    // routerLinkActive applies its state after the navigation settles, one task later.
     await TestBed.inject(Router).navigateByUrl('/evaluation');
-    await fixture.whenStable();
+    await new Promise((resolve) => setTimeout(resolve));
     fixture.detectChanges();
 
     const links = [...(fixture.nativeElement as HTMLElement).querySelectorAll('nav a')];
