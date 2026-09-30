@@ -83,19 +83,16 @@ deploy/k3d/check-resources.sh                       # requests + memory limits, 
   not persistent.
 - **Resources** — requests and memory limits everywhere, no CPU limits (throttling would add
   latency to the measured stages).
-- **RabbitMQ readiness** is a TCP check on the AMQP listener. Compose's `rabbitmq-diagnostics ping`
-  starts an Erlang VM per call and costs about 6 CPU-seconds, which is noise in a latency
-  measurement.
 - **Traces** name the pod, namespace and node (`k8s.*` resource attributes).
 
 ### Measured on the development machine
 
 Virtual device in P2 at 1 Hz, two minutes of steady state each, same day (2026-09-30), the
-cluster freshly installed:
+cluster freshly installed, both paths checking the bus over TCP:
 
 | Path | e2e p50 / p95 / p99 ms | backend p50 / p95 ms |
 |---|---|---|
-| Compose | 7.48 / 9.18 / 10.54 | 6.59 / 7.99 |
+| Compose | 7.12 / 8.10 / 8.53 | 6.07 / 7.04 |
 | k3d | 6.18 / 34.92 / 70.23 | 5.26 / 34.07 |
 
 Medians are comparable. The cluster's tail is heavier, and after a series of disruptive tests
