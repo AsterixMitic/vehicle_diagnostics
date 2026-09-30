@@ -1,0 +1,68 @@
+{{- if .Values.virtualDevice.enabled }}
+{{- $v := .Values.virtualDevice }}
+{{- $ctx := dict "root" $ "component" "virtual-device" }}
+# Synthetic telemetry, the counterpart of the Compose "demo" profile. Its processing mode is a
+# value: an upgrade with a new mode replaces this pod and nothing else.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: virtual-device
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vehicle-diagnostics.labels" $ctx | nindent 4 }}
+spec:
+  replicas: 1
+  # One publisher per device identity: an overlap would interleave two sequence counters.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "vehicle-diagnostics.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vehicle-diagnostics.labels" $ctx | nindent 8 }}
+    spec:
+      enableServiceLinks: false
+      # As on Compose, publish only once the host is ready and subscribed, so the first
+      # messages are not published to a broker with no subscriber.
+      initContainers:
+        {{- include "vehicle-diagnostics.waitFor" (dict "root" $ "targets" (list "api:8080")) | nindent 8 }}
+      containers:
+        - name: virtual-device
+          image: {{ include "vehicle-diagnostics.image" $v.image }}
+          imagePullPolicy: {{ $v.image.pullPolicy }}
+          env:
+            - name: MQTT_HOST
+              value: mosquitto
+            - name: MQTT_PORT
+              value: {{ .Values.mosquitto.service.port | quote }}
+            - name: VEHICLE_ID
+              value: {{ $v.vehicleId | quote }}
+            - name: DEVICE_ID_PREFIX
+              value: {{ $v.deviceIdPrefix | quote }}
+            - name: RATE_HZ
+              value: {{ $v.rateHz | quote }}
+            - name: DEVICE_COUNT
+              value: {{ $v.deviceCount | quote }}
+            - name: PROCESSING_MODE
+              value: {{ $v.processingMode | quote }}
+            - name: HEARTBEAT_FILE
+              value: /tmp/heartbeat
+          # The device touches the heartbeat file after every successful publish.
+          readinessProbe:
+            exec:
+              command: ["bash", "-c", "find /tmp/heartbeat -mmin -0.5 | grep -q ."]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+          # Silent for a minute and a half: reconnecting has failed, start over.
+          livenessProbe:
+            exec:
+              command: ["bash", "-c", "find /tmp/heartbeat -mmin -1.5 | grep -q ."]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            {{- toYaml $v.resources | nindent 12 }}
+{{- end }}

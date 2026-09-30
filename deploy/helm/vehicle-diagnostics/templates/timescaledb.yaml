@@ -1,0 +1,87 @@
+{{- $v := .Values.timescaledb }}
+{{- $ctx := dict "root" $ "component" "timescaledb" }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: timescaledb
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vehicle-diagnostics.labels" $ctx | nindent 4 }}
+spec:
+  serviceName: timescaledb
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "vehicle-diagnostics.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vehicle-diagnostics.labels" $ctx | nindent 8 }}
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: timescaledb
+          image: {{ include "vehicle-diagnostics.image" $v.image }}
+          imagePullPolicy: {{ $v.image.pullPolicy }}
+          env:
+            - name: POSTGRES_DB
+              value: {{ $v.database | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: vehicle-diagnostics-credentials
+                  key: postgres-password
+            # A subdirectory of the volume, so initdb never meets files the provisioner left
+            # in the mount's root.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-d", {{ $v.database | quote }}]
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-d", {{ $v.database | quote }}]
+            # First start runs initdb; a slow disk must not get it killed halfway.
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            {{- toYaml $v.resources | nindent 12 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "vehicle-diagnostics.selectorLabels" $ctx | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with $v.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $v.persistence.size }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: timescaledb
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vehicle-diagnostics.labels" $ctx | nindent 4 }}
+spec:
+  selector:
+    {{- include "vehicle-diagnostics.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres

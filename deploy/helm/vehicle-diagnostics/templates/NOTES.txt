@@ -1,0 +1,20 @@
+vehicle-diagnostics {{ .Chart.AppVersion }} is installed in namespace {{ .Release.Namespace }}.
+
+On the local k3d cluster (deploy/k3d/cluster.yaml) the stack answers on the Compose ports:
+
+  Dashboard         http://localhost:4280
+  MQTT broker       localhost:{{ .Values.mosquitto.service.port }}
+{{- if .Values.aspireDashboard.enabled }}
+  Aspire dashboard  http://localhost:{{ .Values.aspireDashboard.service.uiPort }}
+{{- end }}
+
+Check the release from inside the cluster:
+
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+{{- if .Values.virtualDevice.enabled }}
+
+A virtual device publishes in mode {{ .Values.virtualDevice.processingMode }}. Switch the mode with:
+
+  helm upgrade {{ .Release.Name }} deploy/helm/vehicle-diagnostics -n {{ .Release.Namespace }} \
+    --reuse-values --set virtualDevice.processingMode=P0
+{{- end }}

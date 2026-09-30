@@ -1,0 +1,131 @@
+# Values mirror deploy/compose/docker-compose.yml, so both paths run the same images with the
+# same configuration (ADR-0006). Service names are fixed to the Compose names: install one
+# release per namespace.
+#
+# Resources (design D8): every container has requests and a memory limit and, deliberately,
+# no CPU limit. CFS throttling would add latency to the stages the thesis measures.
+
+# Dev-only posture (ADR-0003): the Compose defaults. Override with --set for anything shared.
+credentials:
+  postgresPassword: postgres
+  rabbitmqUser: guest
+  rabbitmqPassword: guest
+
+# Init containers (waiting for dependencies) and the Helm test pod.
+busybox:
+  image:
+    repository: busybox
+    tag: "1.37"
+    pullPolicy: IfNotPresent
+  resources:
+    requests: { cpu: 10m, memory: 8Mi }
+    limits: { memory: 32Mi }
+
+mosquitto:
+  image:
+    repository: eclipse-mosquitto
+    tag: "2"
+    pullPolicy: IfNotPresent
+  service:
+    # ServiceLB publishes it on the node, so devices outside the cluster reach port 1883.
+    type: LoadBalancer
+    port: 1883
+  # Copy of edge/mosquitto/mosquitto.conf: Helm cannot read files outside the chart. Keep the
+  # two in step (anonymous plain TCP until the security increment, ADR-0003).
+  config: |
+    listener 1883
+    allow_anonymous true
+  resources:
+    requests: { cpu: 10m, memory: 16Mi }
+    limits: { memory: 64Mi }
+
+timescaledb:
+  image:
+    repository: timescale/timescaledb
+    tag: latest-pg17
+    pullPolicy: IfNotPresent
+  database: telemetrydb
+  persistence:
+    size: 2Gi
+    # Empty selects the cluster default (k3s: local-path, node-local).
+    storageClass: ""
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+rabbitmq:
+  image:
+    repository: rabbitmq
+    tag: 4-management-alpine
+    pullPolicy: IfNotPresent
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { memory: 384Mi }
+
+# The monolith host. Always one replica, replaced rather than rolled (design D3): two instances
+# would both subscribe to the device topics and ingest every message twice.
+api:
+  image:
+    repository: vehiclediagnostics/api
+    tag: dev
+    pullPolicy: IfNotPresent
+  # As on Compose: the host has no exception-handler middleware outside Development.
+  environment: Development
+  # OTLP endpoint when the bundled Aspire dashboard is disabled; empty exports nothing.
+  otlpEndpoint: ""
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { memory: 384Mi }
+
+# The dashboard (ADR-0005): nginx serves the Angular build and proxies /api to api:8080.
+web:
+  image:
+    repository: vehiclediagnostics/web
+    tag: dev
+    pullPolicy: IfNotPresent
+  ingress:
+    enabled: true
+    className: traefik
+    # Empty matches any host name.
+    host: ""
+  resources:
+    requests: { cpu: 10m, memory: 16Mi }
+    limits: { memory: 64Mi }
+
+# OTLP receiver with a trace/metric/log UI, the Compose path's observability sink.
+aspireDashboard:
+  enabled: true
+  image:
+    repository: mcr.microsoft.com/dotnet/aspire-dashboard
+    tag: "13.5.2"
+    pullPolicy: IfNotPresent
+  service:
+    type: LoadBalancer
+    uiPort: 18888
+    # OTLP gRPC for hosts running outside the cluster.
+    otlpPort: 18889
+  # It keeps everything in memory; these caps keep it inside its memory limit.
+  telemetryLimits:
+    MaxLogCount: 2000
+    MaxTraceCount: 2000
+    MaxMetricsCount: 20000
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 384Mi }
+
+# Publishes synthetic telemetry into the broker, like the Compose "demo" profile.
+virtualDevice:
+  enabled: false
+  image:
+    repository: vehiclediagnostics/virtual-device
+    tag: dev
+    pullPolicy: IfNotPresent
+  vehicleId: car-01
+  deviceIdPrefix: esp32
+  # P0 publishes raw OBD-II frames (the backend decodes); P2 publishes decoded signals.
+  processingMode: P2
+  rateHz: 1
+  deviceCount: 1
+  resources:
+    requests: { cpu: 20m, memory: 32Mi }
+    limits: { memory: 128Mi }

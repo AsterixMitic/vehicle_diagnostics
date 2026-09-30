@@ -1,0 +1,78 @@
+{{- $v := .Values.rabbitmq }}
+{{- $ctx := dict "root" $ "component" "rabbitmq" }}
+# Internal bus between bounded contexts (ADR-0004). No volume, as on Compose: it holds only
+# in-flight messages, and a fresh pod starts a fresh node.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rabbitmq
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vehicle-diagnostics.labels" $ctx | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "vehicle-diagnostics.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vehicle-diagnostics.labels" $ctx | nindent 8 }}
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: rabbitmq
+          image: {{ include "vehicle-diagnostics.image" $v.image }}
+          imagePullPolicy: {{ $v.image.pullPolicy }}
+          env:
+            - name: RABBITMQ_DEFAULT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: vehicle-diagnostics-credentials
+                  key: rabbitmq-user
+            - name: RABBITMQ_DEFAULT_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: vehicle-diagnostics-credentials
+                  key: rabbitmq-password
+          ports:
+            - name: amqp
+              containerPort: 5672
+            - name: management
+              containerPort: 15672
+          readinessProbe:
+            exec:
+              command: ["rabbitmq-diagnostics", "-q", "ping"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: amqp
+            # Boot takes 10-20 s before the listener opens.
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            {{- toYaml $v.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vehicle-diagnostics.labels" $ctx | nindent 4 }}
+spec:
+  selector:
+    {{- include "vehicle-diagnostics.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: amqp
+      port: 5672
+      targetPort: amqp
+    - name: management
+      port: 15672
+      targetPort: management

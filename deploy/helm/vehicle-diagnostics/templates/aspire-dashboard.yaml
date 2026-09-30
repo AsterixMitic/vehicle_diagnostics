@@ -1,0 +1,77 @@
+{{- if .Values.aspireDashboard.enabled }}
+{{- $v := .Values.aspireDashboard }}
+{{- $ctx := dict "root" $ "component" "aspire-dashboard" }}
+# OTLP receiver with a trace/metric/log UI, the observability sink of the Compose path. The
+# kubelet probes over HTTP itself, so the upstream distroless image needs no derived probe tool.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aspire-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vehicle-diagnostics.labels" $ctx | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "vehicle-diagnostics.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vehicle-diagnostics.labels" $ctx | nindent 8 }}
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: aspire-dashboard
+          image: {{ include "vehicle-diagnostics.image" $v.image }}
+          imagePullPolicy: {{ $v.image.pullPolicy }}
+          env:
+            # Dev-only posture (ADR-0003): unauthenticated, reachable from the developer machine.
+            - name: DOTNET_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS
+              value: "true"
+            {{- range $name, $limit := $v.telemetryLimits }}
+            - name: Dashboard__TelemetryLimits__{{ $name }}
+              value: {{ $limit | quote }}
+            {{- end }}
+          ports:
+            - name: ui
+              containerPort: 18888
+            - name: otlp
+              containerPort: 18889
+          readinessProbe:
+            httpGet:
+              path: /
+              port: ui
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: ui
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            {{- toYaml $v.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aspire-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vehicle-diagnostics.labels" $ctx | nindent 4 }}
+spec:
+  type: {{ $v.service.type }}
+  selector:
+    {{- include "vehicle-diagnostics.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: ui
+      port: {{ $v.service.uiPort }}
+      targetPort: ui
+    - name: otlp
+      port: {{ $v.service.otlpPort }}
+      targetPort: otlp
+{{- end }}

@@ -1,0 +1,14 @@
+apiVersion: v2
+name: vehicle-diagnostics
+description: >-
+  The vehicle-diagnostics stack (MQTT broker, TimescaleDB, RabbitMQ, monolith host, dashboard,
+  optional OTLP sink and virtual device) as one release on k3s. Decisions in ADR-0006.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.30.0-0"
+keywords:
+  - iot
+  - can
+  - mqtt
+  - timescaledb

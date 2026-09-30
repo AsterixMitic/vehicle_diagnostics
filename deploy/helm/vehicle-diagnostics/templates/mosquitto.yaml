@@ -1,0 +1,81 @@
+{{- $v := .Values.mosquitto }}
+{{- $ctx := dict "root" $ "component" "mosquitto" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mosquitto-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vehicle-diagnostics.labels" $ctx | nindent 4 }}
+data:
+  mosquitto.conf: |
+    {{- $v.config | trimSuffix "\n" | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mosquitto
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vehicle-diagnostics.labels" $ctx | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "vehicle-diagnostics.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vehicle-diagnostics.labels" $ctx | nindent 8 }}
+      annotations:
+        # Restart the broker when its configuration changes.
+        checksum/config: {{ $v.config | sha256sum }}
+    spec:
+      # Service environment variables are never read; keep them out of every container.
+      enableServiceLinks: false
+      containers:
+        - name: mosquitto
+          image: {{ include "vehicle-diagnostics.image" $v.image }}
+          imagePullPolicy: {{ $v.image.pullPolicy }}
+          ports:
+            - name: mqtt
+              containerPort: 1883
+          volumeMounts:
+            - name: config
+              mountPath: /mosquitto/config/mosquitto.conf
+              subPath: mosquitto.conf
+              readOnly: true
+          readinessProbe:
+            # A real subscription round-trip, not just an open port (as on Compose).
+            exec:
+              command: ["mosquitto_sub", "-h", "localhost", "-t", "$SYS/#", "-C", "1", "-i", "readiness", "-W", "3"]
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: mqtt
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            {{- toYaml $v.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: mosquitto-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mosquitto
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vehicle-diagnostics.labels" $ctx | nindent 4 }}
+spec:
+  type: {{ $v.service.type }}
+  selector:
+    {{- include "vehicle-diagnostics.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: mqtt
+      port: {{ $v.service.port }}
+      targetPort: mqtt
