@@ -1,0 +1,36 @@
+# Local k3s cluster in Docker (ADR-0006): one k3s server node, created by deploy/k3d/up.sh.
+#
+# The published ports are the Compose ones, so browsers, the virtual device on the host and the
+# ESP32 firmware configuration are identical on both paths; the two cannot run at the same time.
+# All of them are bound to localhost, like Compose (dev-only posture, ADR-0003).
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: vehicle-diagnostics
+servers: 1
+agents: 0
+# k3s stable channel at the time of writing; pinned so Traefik's streaming behaviour is fixed.
+image: rancher/k3s:v1.36.4-k3s1
+kubeAPI:
+  hostIP: 127.0.0.1
+  hostPort: "6550"
+ports:
+  # Traefik ingress -> dashboard (Compose: web on 4280).
+  - port: 127.0.0.1:4280:80
+    nodeFilters: [loadbalancer]
+  # ServiceLB -> Mosquitto.
+  - port: 127.0.0.1:1883:1883
+    nodeFilters: [loadbalancer]
+  # ServiceLB -> Aspire dashboard UI and OTLP gRPC.
+  - port: 127.0.0.1:18888:18888
+    nodeFilters: [loadbalancer]
+  - port: 127.0.0.1:18889:18889
+    nodeFilters: [loadbalancer]
+options:
+  k3d:
+    wait: true
+    timeout: 180s
+  # The scripts write the kubeconfig to <repo>/.tools/kubeconfig; ~/.kube/config is not touched.
+  kubeconfig:
+    updateDefaultKubeconfig: false
+    switchCurrentContext: false
