@@ -48,9 +48,12 @@ services:
       - "127.0.0.1:5672:5672"
       - "127.0.0.1:15672:15672"
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      # The AMQP listener opens only once the node has booted. Not `rabbitmq-diagnostics ping`:
+      # every call starts an Erlang VM with a scheduler per core, about 6 CPU-seconds, which
+      # would disturb the latencies under measurement.
+      test: ["CMD", "nc", "-z", "-w", "3", "127.0.0.1", "5672"]
       interval: 5s
-      timeout: 10s
+      timeout: 5s
       retries: 12
       start_period: 20s
 
