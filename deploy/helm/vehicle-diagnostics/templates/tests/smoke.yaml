@@ -1,6 +1,8 @@
 {{- $ctx := dict "root" $ "component" "smoke-test" }}
-# `helm test <release>`: fails unless the host reports exactly "Healthy" and a read request
-# through the dashboard's proxy returns the host's JSON (design D10).
+# `helm test <release>`: fails unless, within a minute, the host reports exactly "Healthy" and a
+# read request through the dashboard's proxy returns the host's JSON (design D10). The minute
+# covers a release still converging, e.g. the host reconnecting after the bus was replaced by
+# the same upgrade; a host that does not serve fails the test.
 apiVersion: v1
 kind: Pod
 metadata:
@@ -13,7 +15,7 @@ metadata:
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
   restartPolicy: Never
-  activeDeadlineSeconds: 60
+  activeDeadlineSeconds: 90
   enableServiceLinks: false
   containers:
     - name: smoke-test
@@ -23,15 +25,24 @@ spec:
         - sh
         - -c
         - |
-          set -e
-          health="$(wget -qO- -T 5 http://api:8080/health)"
+          check() {
+            health="$(wget -qO- -T 5 http://api:8080/health 2>&1)" || return 1
+            [ "$health" = "Healthy" ] || return 1
+            devices="$(wget -qO- -T 5 http://web/api/devices 2>&1)" || return 1
+            case "$devices" in \[*) return 0 ;; *) return 1 ;; esac
+          }
+          deadline=$(( $(date +%s) + 60 ))
+          until check; do
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "api /health: $health"
+              echo "web /api/devices: $devices"
+              echo "smoke test failed"
+              exit 1
+            fi
+            sleep 3
+          done
           echo "api /health: $health"
-          [ "$health" = "Healthy" ]
-          devices="$(wget -qO- -T 5 http://web/api/devices)"
           echo "web /api/devices: $devices"
-          case "$devices" in
-            \[*) echo "smoke test passed" ;;
-            *) echo "not a JSON array"; exit 1 ;;
-          esac
+          echo "smoke test passed"
       resources:
         {{- toYaml .Values.busybox.resources | nindent 8 }}
