@@ -33,7 +33,8 @@ public sealed class DeviceSimulator(
     string deviceId,
     double rateHz,
     SimulatedMode mode,
-    string? heartbeatFile)
+    string? heartbeatFile,
+    TimeSpan startOffset = default)
 {
     private const uint ObdResponseId = 0x7E8;
 
@@ -54,11 +55,18 @@ public sealed class DeviceSimulator(
             ? TelemetryTopics.Raw(vehicleId, deviceId)
             : TelemetryTopics.Signals(vehicleId, deviceId);
         var interval = TimeSpan.FromSeconds(1.0 / rateHz);
-        using var timer = new PeriodicTimer(interval);
         double elapsedSeconds = 0;
 
         try
         {
+            // The phase of this device's sampling period. Independent devices are not synchronized,
+            // so a fleet started at once would otherwise publish in bursts it never produces.
+            if (startOffset > TimeSpan.Zero)
+            {
+                await Task.Delay(startOffset, cancellationToken).ConfigureAwait(false);
+            }
+
+            using var timer = new PeriodicTimer(interval);
             while (!cancellationToken.IsCancellationRequested)
             {
                 // Like the real gateway, the simulator reconnects on its own after a broker

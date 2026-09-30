@@ -9,6 +9,8 @@ using VehicleDiagnostics.VirtualDevice;
 //   DEVICE_ID_PREFIX (esp32) · RATE_HZ (1) · DEVICE_COUNT (1)
 //   PROCESSING_MODE (P2) — P0 publishes raw frames on tel/raw, P2 decoded signals on tel/signals
 //   HEARTBEAT_FILE (unset) — when set, touched after every publish, for container health checks
+//   PHASE_SPREAD (even) — even: device i of n starts (i−1)/n of a period late, like independent
+//                         devices; sync: all devices start together and publish in bursts
 
 string host = Environment.GetEnvironmentVariable("MQTT_HOST") ?? "localhost";
 string? heartbeatFile = Environment.GetEnvironmentVariable("HEARTBEAT_FILE");
@@ -17,6 +19,7 @@ string vehicleId = Environment.GetEnvironmentVariable("VEHICLE_ID") ?? "car-01";
 string devicePrefix = Environment.GetEnvironmentVariable("DEVICE_ID_PREFIX") ?? "esp32";
 double rateHz = double.TryParse(Environment.GetEnvironmentVariable("RATE_HZ"), out double r) && r > 0 ? r : 1.0;
 int deviceCount = int.TryParse(Environment.GetEnvironmentVariable("DEVICE_COUNT"), out int d) && d > 0 ? d : 1;
+bool synchronized = string.Equals(Environment.GetEnvironmentVariable("PHASE_SPREAD"), "sync", StringComparison.OrdinalIgnoreCase);
 SimulatedMode mode = Enum.TryParse(Environment.GetEnvironmentVariable("PROCESSING_MODE"), ignoreCase: true, out SimulatedMode m)
     ? m
     : SimulatedMode.P2;
@@ -29,10 +32,11 @@ Console.CancelKeyPress += (_, args) =>
 };
 
 Console.WriteLine(
-    $"Virtual device(s) → mqtt://{host}:{port}  vehicle={vehicleId}  devices={deviceCount}  rate={rateHz} Hz  mode={mode}. Ctrl+C stops.");
+    $"Virtual device(s) → mqtt://{host}:{port}  vehicle={vehicleId}  devices={deviceCount}  rate={rateHz} Hz  mode={mode}  phases={(synchronized ? "sync" : "even")}. Ctrl+C stops.");
 
 Task[] devices = [.. Enumerable.Range(1, deviceCount)
-    .Select(i => new DeviceSimulator(host, port, vehicleId, $"{devicePrefix}-{i:D2}", rateHz, mode, heartbeatFile)
+    .Select(i => new DeviceSimulator(host, port, vehicleId, $"{devicePrefix}-{i:D2}", rateHz, mode, heartbeatFile,
+            synchronized ? TimeSpan.Zero : TimeSpan.FromSeconds((i - 1) / (double)deviceCount / rateHz))
         .RunAsync(shutdown.Token))];
 
 await Task.WhenAll(devices);
