@@ -34,3 +34,6 @@ firmware/**/build/
 firmware/**/sdkconfig
 firmware/**/sdkconfig.old
 firmware/**/managed_components/
+
+# Python bytecode
+__pycache__/
