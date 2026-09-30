@@ -849,7 +849,8 @@ U svakom trenutku postoji **radna kičma kraj-do-kraj**, a složenost se dodaje 
 ├── edge/                                     # kompozicija za edge server
 ├── deploy/
 │   ├── compose/
-│   └── helm/
+│   ├── helm/                                 # Helm chart celog sistema (ADR-0006)
+│   └── k3d/                                  # lokalni k3s klaster i skripte (ADR-0006)
 ├── observability/
 │   ├── alloy/
 │   ├── dashboards/
