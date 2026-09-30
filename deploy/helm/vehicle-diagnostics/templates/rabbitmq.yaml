@@ -42,12 +42,13 @@ spec:
               containerPort: 5672
             - name: management
               containerPort: 15672
+          # The AMQP listener opens only once the node has booted. Not `rabbitmq-diagnostics
+          # ping`: every call starts an Erlang VM with a scheduler per core, measured at about
+          # 6 CPU-seconds, which would disturb the latencies under measurement.
           readinessProbe:
-            exec:
-              command: ["rabbitmq-diagnostics", "-q", "ping"]
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            timeoutSeconds: 10
+            tcpSocket:
+              port: amqp
+            periodSeconds: 5
             failureThreshold: 3
           livenessProbe:
             tcpSocket:
