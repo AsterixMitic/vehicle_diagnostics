@@ -46,6 +46,8 @@ spec:
               value: mosquitto
             - name: Mqtt__Port
               value: {{ .Values.mosquitto.service.port | quote }}
+            - name: Mqtt__IngestConcurrency
+              value: {{ $v.ingestConcurrency | quote }}
             - name: ConnectionStrings__rabbitmq
               valueFrom:
                 secretKeyRef:

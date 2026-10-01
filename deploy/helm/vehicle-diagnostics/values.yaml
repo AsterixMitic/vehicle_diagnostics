@@ -73,6 +73,8 @@ api:
   environment: Development
   # OTLP endpoint when the bundled Aspire dashboard is disabled; empty exports nothing.
   otlpEndpoint: ""
+  # MQTT messages handled at once, each device by one worker; 1 is the sequential baseline.
+  ingestConcurrency: 8
   resources:
     requests: { cpu: 100m, memory: 128Mi }
     limits: { memory: 384Mi }

@@ -85,6 +85,8 @@ services:
       ConnectionStrings__telemetrydb: Host=timescaledb;Port=5432;Database=telemetrydb;Username=postgres;Password=${POSTGRES_PASSWORD:-postgres}
       Mqtt__Host: mosquitto
       Mqtt__Port: "1883"
+      # Messages handled at once, each device by one worker; 1 is the sequential baseline.
+      Mqtt__IngestConcurrency: ${INGEST_CONCURRENCY:-8}
       ConnectionStrings__rabbitmq: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672
       OTEL_EXPORTER_OTLP_ENDPOINT: http://aspire-dashboard:18889
       OTEL_SERVICE_NAME: api
