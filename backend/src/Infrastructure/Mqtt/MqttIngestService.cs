@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Diagnostics;
+using System.Threading.Channels;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -20,6 +21,12 @@ namespace VehicleDiagnostics.Infrastructure.Mqtt;
 /// bus. An explicit reconnect loop replaces the managed client MQTTnet v5 no longer ships:
 /// connectivity is re-checked every second and a reconnect always re-subscribes. A failing
 /// message never stops the pipeline.
+/// <para>
+/// MQTTnet delivers one message at a time. The handler only records the receipt and hands the
+/// message to one of <see cref="MqttIngestOptions.IngestConcurrency"/> workers, chosen by device,
+/// so devices are handled in parallel while each device keeps its order. The QoS 1
+/// acknowledgement is sent once a worker has handled the message.
+/// </para>
 /// </summary>
 public sealed partial class MqttIngestService(
     IServiceScopeFactory scopeFactory,
@@ -29,9 +36,41 @@ public sealed partial class MqttIngestService(
     ILogger<MqttIngestService> logger) : BackgroundService
 {
     private static readonly TimeSpan ReconnectProbeInterval = TimeSpan.FromSeconds(1);
+
+    // Mosquitto lets 20 unacknowledged QoS 1 messages be in flight per client; this only bounds
+    // what one worker may hold beyond that, and a full queue blocks delivery (back-pressure).
+    private const int WorkerQueueCapacity = 64;
+
+    private Channel<PendingMessage>[] _workerQueues = [];
     private static readonly TimeSpan ReconnectFailureBackoff = TimeSpan.FromSeconds(5);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        _workerQueues = [.. Enumerable.Range(0, options.Value.IngestConcurrency).Select(_ =>
+            Channel.CreateBounded<PendingMessage>(new BoundedChannelOptions(WorkerQueueCapacity)
+            {
+                SingleReader = true,
+                SingleWriter = true,
+                FullMode = BoundedChannelFullMode.Wait,
+            }))];
+        Task[] workers = [.. _workerQueues.Select(queue => Task.Run(() => RunWorkerAsync(queue.Reader, stoppingToken), CancellationToken.None))];
+
+        try
+        {
+            await RunClientAsync(stoppingToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            foreach (Channel<PendingMessage> queue in _workerQueues)
+            {
+                queue.Writer.TryComplete();
+            }
+
+            await Task.WhenAll(workers).ConfigureAwait(false);
+        }
+    }
+
+    private async Task RunClientAsync(CancellationToken stoppingToken)
     {
         var factory = new MqttClientFactory();
         using IMqttClient client = factory.CreateMqttClient();
@@ -97,12 +136,53 @@ public sealed partial class MqttIngestService(
 
     private async Task HandleMessageAsync(MqttApplicationMessageReceivedEventArgs args, CancellationToken cancellationToken)
     {
-        // Measured first, before any parsing: this is the moment the message reached the backend.
+        // Measured first, before any parsing or queueing: this is the moment the message reached the backend.
         var receipt = new ReceiptInfo(timeProvider.GetUtcNow(), checked((int)args.ApplicationMessage.Payload.Length));
+        args.AutoAcknowledge = false;
+        var pending = new PendingMessage(args.ApplicationMessage.Topic, args.ApplicationMessage.Payload.ToArray(), receipt, args);
+        await _workerQueues[WorkerFor(pending.Topic, _workerQueues.Length)].Writer
+            .WriteAsync(pending, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>The worker for a topic: the same for every message of a device, so its order holds.</summary>
+    internal static int WorkerFor(string topic, int workers)
+    {
+        if (workers <= 1 || !TelemetryTopics.TryParseTelemetry(topic, out _, out string? deviceId, out _))
+        {
+            return 0;
+        }
+
+        return (int)((uint)StringComparer.Ordinal.GetHashCode(deviceId) % (uint)workers);
+    }
+
+    private async Task RunWorkerAsync(ChannelReader<PendingMessage> queue, CancellationToken stoppingToken)
+    {
+        await foreach (PendingMessage pending in queue.ReadAllAsync(CancellationToken.None).ConfigureAwait(false))
+        {
+            IngestDiagnostics.QueueWait.Record((timeProvider.GetUtcNow() - pending.Receipt.ReceivedAt).TotalMilliseconds);
+            await HandlePendingAsync(pending, stoppingToken).ConfigureAwait(false);
+            try
+            {
+                await pending.Args.AcknowledgeAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                // The connection dropped after the message was handled; it was persisted or settled
+                // already, and a redelivery would be deduplicated.
+                IngestDiagnostics.AcknowledgeFailed.Add(1);
+                LogAcknowledgeFailed(logger, pending.Topic, exception);
+            }
+        }
+    }
+
+    private async Task HandlePendingAsync(PendingMessage pending, CancellationToken cancellationToken)
+    {
+        ReceiptInfo receipt = pending.Receipt;
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         var message = new InboundMessage(
-            args.ApplicationMessage.Topic,
-            args.ApplicationMessage.Payload.ToArray(),
+            pending.Topic,
+            pending.Payload,
             receipt,
             scope.ServiceProvider,
             scope.ServiceProvider.GetRequiredService<IMessageSettlementReporter>());
@@ -334,12 +414,21 @@ public sealed partial class MqttIngestService(
             0);
 
     /// <summary>One broker message and the per-message scope it is processed in.</summary>
+    private sealed record PendingMessage(
+        string Topic,
+        byte[] Payload,
+        ReceiptInfo Receipt,
+        MqttApplicationMessageReceivedEventArgs Args);
+
     private sealed record InboundMessage(
         string Topic,
         byte[] Payload,
         ReceiptInfo Receipt,
         IServiceProvider Services,
         IMessageSettlementReporter Reporter);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Could not acknowledge a handled message on {Topic}")]
+    private static partial void LogAcknowledgeFailed(ILogger logger, string topic, Exception exception);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Connected and subscribed to MQTT broker {Host}:{Port}")]
     private static partial void LogConnected(ILogger logger, string host, int port);

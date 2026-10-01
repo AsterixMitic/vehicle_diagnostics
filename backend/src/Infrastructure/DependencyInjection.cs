@@ -60,7 +60,10 @@ public static class DependencyInjection
         services.AddScoped<IEvaluationQueries, TimescaleEvaluationQueries>();
         services.AddInternalBus(configuration);
 
-        services.Configure<MqttIngestOptions>(configuration.GetSection("Mqtt"));
+        services.AddOptions<MqttIngestOptions>()
+            .Bind(configuration.GetSection("Mqtt"))
+            .Validate(o => o.IngestConcurrency >= 1, "Mqtt:IngestConcurrency must be at least 1.")
+            .ValidateOnStart();
         services.AddSingleton<MqttConnectionState>();
         services.AddHostedService<MqttIngestService>();
 

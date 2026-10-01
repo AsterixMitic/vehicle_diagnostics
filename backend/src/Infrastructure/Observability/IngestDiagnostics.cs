@@ -41,6 +41,14 @@ public static class IngestDiagnostics
     public static readonly Counter<long> SettlementsFailed =
         Meter.CreateCounter<long>("ingest.settlements.failed", description: "Settlements that could not be published; the measurement is lost, the message is not");
 
+    public static readonly Histogram<double> QueueWait =
+        Meter.CreateHistogram<double>("ingest.queue.wait", unit: "ms",
+            description: "Time a received message waited for its ingest worker");
+
+    public static readonly Counter<long> AcknowledgeFailed =
+        Meter.CreateCounter<long>("ingest.acknowledge.failed",
+            description: "Handled messages whose QoS 1 acknowledgement could not be sent; the broker redelivers them if the session survives");
+
     public static void CountRejected(string reason) =>
         MessagesRejected.Add(1, new KeyValuePair<string, object?>("reason", reason));
 }

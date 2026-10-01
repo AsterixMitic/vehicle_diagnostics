@@ -8,4 +8,10 @@ public sealed class MqttIngestOptions
     public int Port { get; set; } = 1883;
 
     public string ClientId { get; set; } = "vehiclediagnostics-ingest";
+
+    /// <summary>
+    /// Messages handled at once, each device always by the same worker so its order holds.
+    /// 1 handles everything sequentially; the default matches the bus partitions.
+    /// </summary>
+    public int IngestConcurrency { get; set; } = 8;
 }

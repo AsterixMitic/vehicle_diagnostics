@@ -13,6 +13,7 @@ using Testcontainers.RabbitMq;
 using VehicleDiagnostics.Api.Endpoints;
 using VehicleDiagnostics.Infrastructure;
 using VehicleDiagnostics.Infrastructure.Messaging;
+using VehicleDiagnostics.Infrastructure.Mqtt;
 using VehicleDiagnostics.Infrastructure.Telemetry;
 using Xunit;
 
@@ -72,7 +73,26 @@ public sealed class StackFixture : IAsyncLifetime
 
         await host.Services.InitializeSchemasAsync(CancellationToken.None);
         await host.StartAsync();
+        await WaitUntilSubscribedAsync(host);
         return host;
+    }
+
+    /// <summary>
+    /// Waits until the ingest service has subscribed. A message published before that has no
+    /// subscriber, and the broker drops it: a test that publishes right after start would race.
+    /// </summary>
+    private static async Task WaitUntilSubscribedAsync(IHost host)
+    {
+        var state = host.Services.GetRequiredService<MqttConnectionState>();
+        for (int attempt = 0; attempt < 150 && !state.IsConnected; attempt++)
+        {
+            await Task.Delay(100);
+        }
+
+        if (!state.IsConnected)
+        {
+            throw new InvalidOperationException("The ingest service did not subscribe within 15 s.");
+        }
     }
 
     /// <summary>
