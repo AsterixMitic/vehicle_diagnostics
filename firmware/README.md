@@ -3,8 +3,9 @@
 Embedded side of the vehicle-diagnostics platform: the ESP32 gateway and the Arduino ECU
 simulator. Conventions are in `CONVENTIONS.md`; the system design is in `../docs/architecture.md`.
 
-Phase F0 scope: prove a CAN frame crosses the bench in both directions. No transport protocol,
-no diagnostics, no networking. Those are phases F1 and later.
+Current scope: the gateway reads OBD-II Mode 01 current data from an engine ECU, the bench
+simulator or a real vehicle, decodes it exactly as the backend does and prints every reading on
+the console. Publishing to the backend over WiFi and MQTT is the next increment.
 
 ## Layout
 
@@ -14,12 +15,17 @@ firmware/
 ├── gateway/                      ESP32, ESP-IDF v5.5
 │   ├── components/gw_hal/        the ONLY place vendor headers may appear
 │   ├── components/can_link/      receive task, ring buffer, bus health
-│   ├── main/                     phase F0 application
+│   ├── components/isotp/         ISO 15765-2 transport, no I/O
+│   ├── components/obd/           Mode 01 table, decoder, support bitmaps, scheduler, guard
+│   ├── main/                     the application and its build settings (Kconfig.projbuild)
 │   └── test/
 │       ├── shared/               test sources, used by both test builds
 │       ├── host/                 runs on a development machine, needs only a C compiler
 │       └── target/               runs on an ESP32, real or emulated
 └── sim-ecu/                      Arduino Uno + MCP2515
+    ├── vehicle_model.*           drive cycle and dynamics, no Arduino dependency
+    ├── obd_responder.*           Mode 01 answers and support bitmaps, no Arduino dependency
+    └── test/host/                host tests, round trip through the gateway's decoder
 ```
 
 ## Toolchain
@@ -61,12 +67,40 @@ idf.py -C gateway/test/target build
 idf.py -C gateway/test/target qemu         # unit tests on an emulated ESP32, no hardware
 
 make -C gateway/test/host                  # same tests on a development machine
+make -C sim-ecu/test/host                  # simulator model and responder, host only
 
 arduino-cli compile --fqbn arduino:avr:uno sim-ecu
 ```
 
 The emulator run prints `RESULT: PASS` followed by `TESTS COMPLETE`, then halts. It does not
 exit on its own, so stop it with Ctrl-C or run it under `timeout`.
+
+The OBD decoder test reads the backend's capture fixture, `experiments/captures/synthetic-obd-mode01.*`:
+from the repository on the host, embedded in the binary on the target. Both decoders pass the
+same file, which is what keeps a P0 reading decoded on the backend and a P2 reading decoded on
+the gateway identical.
+
+### Two gateway builds
+
+The build settings live in `gateway/main/Kconfig.projbuild` (`idf.py menuconfig`, menu *Vehicle
+diagnostics gateway*): target (bench or vehicle), listen-only, bit rate (250 or 500 kbps),
+functional addressing, poll period and the error-guard threshold. The defaults are the safe
+ones for a car: target vehicle, listen-only, 500 kbps. Keep the two variants in their own build
+directories, each with its own `sdkconfig`:
+
+```bash
+cd gateway
+# Vehicle, the defaults: listen-only, nothing is transmitted
+idf.py -B build-vehicle -D SDKCONFIG=build-vehicle/sdkconfig build
+
+# Bench: the simulator on the desk, requests on, automatic bus-off recovery
+idf.py -B build-bench -D SDKCONFIG=build-bench/sdkconfig \
+       -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.bench" build
+```
+
+To poll a vehicle, open `idf.py -B build-vehicle -D SDKCONFIG=build-vehicle/sdkconfig menuconfig`
+and clear *Listen only* (and set the bit rate if the car is not on 500 kbps); keep the target on
+*Vehicle*, so the error guard stays armed.
 
 ## Wiring, bench topology A
 
@@ -94,28 +128,58 @@ Three checks before suspecting the code, in this order:
    exactly like bad wiring, and it is the most common bring-up failure.
 3. **Common ground.** Confirm continuity between the two boards' grounds.
 
-## Bring-up procedure
+## Bench procedure
+
+Serial ports belong to the `dialout` group: `sudo usermod -aG dialout $USER`, then log in again.
+Clone Unos with a CH340 and most ESP32 boards appear as `/dev/ttyUSB*`; `ls /dev/serial/by-id/`
+tells them apart. If flashing the ESP32 stops after the baud rate change, flash at `-b 115200`.
 
 ```bash
-idf.py -C gateway -p /dev/ttyUSB0 flash monitor
-arduino-cli upload --fqbn arduino:avr:uno -p /dev/ttyACM0 sim-ecu
-arduino-cli monitor -p /dev/ttyACM0 --config baudrate=115200
+arduino-cli compile --fqbn arduino:avr:uno --upload -p /dev/ttyUSB0 sim-ecu
+arduino-cli monitor -p /dev/ttyUSB0 --config baudrate=115200
+
+cd gateway
+idf.py -B build-bench -D SDKCONFIG=build-bench/sdkconfig -p /dev/ttyUSB1 -b 115200 flash monitor
 ```
 
-The gateway sends a request once a second and prints every frame it receives with its counters.
-The simulator prints each request it receives and each answer it sends.
+The gateway first asks the simulator for its support bitmaps and logs
+`discovered 14 supported PIDs`, then polls them once a second. Every reading is one line, and the
+counters follow every 5 s:
 
-**Phase F0 is met when both consoles show traffic**: the simulator logging `RX 0x7DF` and
-`TX 0x7E8`, and the gateway logging `RX std 0x7E8` followed by the round-trip confirmation.
-That is a frame sent and received in both directions, which is the phase's exit criterion.
+```
+OBD,12345,0x0C,engine_rpm,1726.00,rpm,0x7E8
+I (17312) gateway: stats | cycles=12 requests=171 answers=171 timeouts=0 negative=0 ...
+```
 
-If the gateway reports `transmit timed out`, no other powered node is acknowledging. On CAN a
-transmitter needs at least one other active node, so this points at the simulator being
-unpowered, the wiring, or the crystal, not at the gateway.
+Record a run with `idf.py ... monitor | tee bench.log`. The simulator prints each request and
+answer, and every 5 s its model state (engine speed, road speed, gear, coolant). The values
+follow a 120 s drive cycle: idle, accelerate through the gears, cruise, brake.
 
-## Working in a real vehicle
+If the gateway counts only timeouts, the simulator is not answering: check its console for
+`MCP2515 ready`, the crystal setting and the wiring. A bench build recovers from bus-off by
+itself and resumes polling.
 
-Do not, until the bench round trip works. Then read `CONVENTIONS.md` for the safety rules and
-`../docs/architecture.md` §3 for topology B. Two differences matter: the termination on the
-transceiver module must be **off**, because the vehicle bus is already terminated at both ends,
-and the `+12 V` line from pin 16 needs a fuse and a buck converter. Read-only services only.
+## First contact with a vehicle
+
+Only after the bench procedure works. Read `CONVENTIONS.md` for the safety rules and
+`../docs/architecture.md` §3 for topology B. The gateway sends nothing but Mode 01 reads.
+
+1. **Protocol.** Plug in the ELM327 first and ask `ATDP` (or let a scanner app show it). Only
+   *ISO 15765-4 CAN, 11-bit ID* at 500 or 250 kbps is supported in this increment.
+2. **Termination off.** The vehicle bus is already terminated at both ends; remove or disable
+   the 120 Ω resistor on the SN65HVD230 module. With the car off, CAN-H to CAN-L at the port
+   should read about 60 Ω, and still about 60 Ω with the gateway attached.
+3. **Power.** Run the ESP32 from the laptop's USB with the laptop **on battery**, not on its
+   charger, to avoid a ground loop through the car. Pin 16 (+12 V, live with the ignition off)
+   needs a fuse and a buck converter before it may power anything.
+4. **Listen first.** Flash the default vehicle build. It transmits and acknowledges nothing and
+   prints, every 5 s, the identifiers it sees (`ID,std,0x7E8,…`) and the bus error count. A
+   silent port is normal on many cars, since the diagnostic gateway only answers requests; rising
+   bus errors mean a wrong bit rate: stop and check step 1.
+5. **Then poll.** Ignition on, vehicle parked. Rebuild with *Listen only* cleared and the target
+   still *Vehicle*, flash, and record: `idf.py -B build-vehicle -D SDKCONFIG=build-vehicle/sdkconfig
+   -p /dev/ttyUSB0 -b 115200 flash monitor | tee car.log`. If the bus errors pass the threshold
+   or the controller goes bus-off, the gateway stops all requests, says why, and listens until
+   reset. If discovery fails, try *functional addressing*.
+6. **Compare** the logged values with the ELM327 or a scanner app while the engine idles.
+7. **Unplug** the gateway when done.
