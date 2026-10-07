@@ -30,6 +30,7 @@ can_link_config_t can_link_default_config(void)
         .filter_mask = 0u,
         .task_priority = configMAX_PRIORITIES - 2u,
         .auto_recover = true,
+        .listen_only = false,
     };
     return config;
 }
@@ -103,6 +104,7 @@ can_link_err_t can_link_start(const can_link_config_t *config)
         .filter_mode = config->filter_mode,
         .filter_id = config->filter_id,
         .filter_mask = config->filter_mask,
+        .listen_only = config->listen_only,
     };
 
     if (hal_can_init(&hal_config) != HAL_CAN_OK) {

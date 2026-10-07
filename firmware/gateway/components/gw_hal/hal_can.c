@@ -82,7 +82,8 @@ hal_can_err_t hal_can_init(const hal_can_config_t *config)
     filter_for(config, &filter);
 
     twai_general_config_t general = TWAI_GENERAL_CONFIG_DEFAULT(
-        (gpio_num_t)config->tx_gpio, (gpio_num_t)config->rx_gpio, TWAI_MODE_NORMAL);
+        (gpio_num_t)config->tx_gpio, (gpio_num_t)config->rx_gpio,
+        config->listen_only ? TWAI_MODE_LISTEN_ONLY : TWAI_MODE_NORMAL);
     /* A deeper driver queue absorbs bursts before our ring buffer ever sees them. */
     general.rx_queue_len = 32;
     general.tx_queue_len = 16;
@@ -95,9 +96,10 @@ hal_can_err_t hal_can_init(const hal_can_config_t *config)
 
     s_installed = true;
     s_counters = (hal_can_counters_t){0};
-    ESP_LOGI(TAG, "installed: %u kbps, tx=GPIO%d rx=GPIO%d, filter=%s",
+    ESP_LOGI(TAG, "installed: %u kbps, tx=GPIO%d rx=GPIO%d, filter=%s, mode=%s",
              (unsigned)config->bitrate_kbps, config->tx_gpio, config->rx_gpio,
-             config->filter_mode == HAL_CAN_FILTER_ACCEPT_ALL ? "accept-all" : "mask");
+             config->filter_mode == HAL_CAN_FILTER_ACCEPT_ALL ? "accept-all" : "mask",
+             config->listen_only ? "listen-only" : "normal");
     return HAL_CAN_OK;
 }
 

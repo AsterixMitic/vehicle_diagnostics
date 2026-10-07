@@ -49,6 +49,8 @@ typedef struct {
     hal_can_filter_mode_t filter_mode;
     uint32_t filter_id;                 /**< Used only with HAL_CAN_FILTER_MASK. */
     uint32_t filter_mask;               /**< Used only with HAL_CAN_FILTER_MASK. */
+    /** Neither transmit nor acknowledge: the controller only observes the bus. */
+    bool listen_only;
 } hal_can_config_t;
 
 /** Controller state, mirrored from the peripheral. */

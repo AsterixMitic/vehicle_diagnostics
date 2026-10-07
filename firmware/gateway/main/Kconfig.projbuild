@@ -1,0 +1,58 @@
+menu "Vehicle diagnostics gateway"
+
+    choice GATEWAY_TARGET
+        prompt "Target"
+        default GATEWAY_TARGET_VEHICLE
+        help
+            What the gateway is connected to. A vehicle build stops all requests and keeps
+            only listening as soon as the bus shows errors or the controller goes bus-off, and
+            does not recover automatically. A bench build recovers and resumes.
+
+        config GATEWAY_TARGET_BENCH
+            bool "Bench: the simulated ECU on the desk"
+        config GATEWAY_TARGET_VEHICLE
+            bool "Vehicle: a real car's OBD-II port"
+    endchoice
+
+    config GATEWAY_LISTEN_ONLY
+        bool "Listen only: transmit and acknowledge nothing"
+        default y
+        help
+            The safe first contact with a vehicle. The controller neither sends frames nor
+            acknowledges them, and the gateway reports which identifiers it observes and the
+            bus error count. Turn this off only once the bit rate is known to be right.
+
+    choice GATEWAY_CAN_BITRATE
+        prompt "CAN bit rate"
+        default GATEWAY_CAN_BITRATE_500
+        help
+            ISO 15765-4 allows 250 and 500 kbps on the OBD-II port. Check the vehicle's
+            protocol with an ELM327 (ATDP) before building for it.
+
+        config GATEWAY_CAN_BITRATE_500
+            bool "500 kbps"
+        config GATEWAY_CAN_BITRATE_250
+            bool "250 kbps"
+    endchoice
+
+    config GATEWAY_FUNCTIONAL_ADDRESSING
+        bool "Request on 0x7DF (functional) instead of 0x7E0 (physical)"
+        default n
+        help
+            For engine ECUs that do not answer physically addressed requests. Answers are
+            still taken only from 0x7E8.
+
+    config GATEWAY_POLL_PERIOD_MS
+        int "Poll cycle period (ms)"
+        range 100 60000
+        default 1000
+
+    config GATEWAY_ERROR_GUARD_THRESHOLD
+        int "Bus errors after which a vehicle build stops requesting"
+        range 1 1000
+        default 16
+        help
+            Counted from the start of polling. Well below the 96 errors at which a CAN
+            controller turns error passive.
+
+endmenu

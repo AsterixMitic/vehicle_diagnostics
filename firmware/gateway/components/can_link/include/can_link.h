@@ -33,6 +33,8 @@ typedef struct {
      * bus it is evidently not suited to.
      */
     bool auto_recover;
+    /** Observe only: nothing is transmitted or acknowledged, and transmit fails. */
+    bool listen_only;
 } can_link_config_t;
 
 /** A default bench configuration: 500 kbps, accept every identifier, recover automatically. */

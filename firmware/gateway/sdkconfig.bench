@@ -1,0 +1,5 @@
+# Bench overlay: the simulated ECU on the desk, requests on, automatic bus-off recovery.
+# Build with: idf.py -B build-bench -D SDKCONFIG=build-bench/sdkconfig \
+#             -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.bench" build
+CONFIG_GATEWAY_TARGET_BENCH=y
+# CONFIG_GATEWAY_LISTEN_ONLY is not set
