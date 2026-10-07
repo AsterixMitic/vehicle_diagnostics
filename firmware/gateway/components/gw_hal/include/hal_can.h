@@ -98,7 +98,10 @@ hal_can_err_t hal_can_get_counters(hal_can_counters_t *out_counters);
 
 hal_can_state_t hal_can_get_state(void);
 
-/** Start recovery from the bus-off state. Returns to running once the bus is healthy. */
+/**
+ * Start recovery from the bus-off state. When recovery completes the controller is stopped,
+ * not running, and traffic resumes only after hal_can_start().
+ */
 hal_can_err_t hal_can_recover(void);
 
 /** Microseconds since boot, for callers that need the same clock as @c timestamp_us. */

@@ -27,9 +27,15 @@ typedef struct {
     uint32_t filter_mask;
     /** Receive task priority. Must exceed every consumer's priority. */
     unsigned task_priority;
+    /**
+     * Recover from bus-off and start the controller again without a reset. True on the bench;
+     * on a vehicle a bus-off is reported and left alone, so the gateway stops disturbing a
+     * bus it is evidently not suited to.
+     */
+    bool auto_recover;
 } can_link_config_t;
 
-/** A default bench configuration: 500 kbps, accept every identifier. */
+/** A default bench configuration: 500 kbps, accept every identifier, recover automatically. */
 can_link_config_t can_link_default_config(void);
 
 typedef struct {

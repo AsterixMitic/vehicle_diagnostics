@@ -15,6 +15,9 @@ static can_ring_buffer_t s_buffer;
 static TaskHandle_t s_rx_task;
 static volatile bool s_running;
 static volatile uint32_t s_recoveries;
+static bool s_auto_recover;
+/** A recovery was initiated and the controller has not been started again yet. */
+static bool s_recovering;
 
 can_link_config_t can_link_default_config(void)
 {
@@ -26,6 +29,7 @@ can_link_config_t can_link_default_config(void)
         .filter_id = 0u,
         .filter_mask = 0u,
         .task_priority = configMAX_PRIORITIES - 2u,
+        .auto_recover = true,
     };
     return config;
 }
@@ -53,9 +57,17 @@ static void can_rx_task(void *arg)
 
         if (err == HAL_CAN_ERR_TIMEOUT) {
             /* Idle bus. Use the quiet moment to check the controller is still healthy. */
-            if (hal_can_get_state() == HAL_CAN_STATE_BUS_OFF) {
+            const hal_can_state_t state = hal_can_get_state();
+            if (s_auto_recover && state == HAL_CAN_STATE_BUS_OFF && !s_recovering) {
                 if (hal_can_recover() == HAL_CAN_OK) {
+                    s_recovering = true;
+                }
+            } else if (s_recovering && state == HAL_CAN_STATE_STOPPED) {
+                /* The driver stops once recovery completes; traffic resumes only on start. */
+                if (hal_can_start() == HAL_CAN_OK) {
+                    s_recovering = false;
                     s_recoveries++;
+                    ESP_LOGI(TAG, "recovered from bus-off, controller running again");
                 }
             }
             continue;
@@ -81,6 +93,8 @@ can_link_err_t can_link_start(const can_link_config_t *config)
 
     can_ring_buffer_init(&s_buffer);
     s_recoveries = 0u;
+    s_auto_recover = config->auto_recover;
+    s_recovering = false;
 
     const hal_can_config_t hal_config = {
         .tx_gpio = config->tx_gpio,
