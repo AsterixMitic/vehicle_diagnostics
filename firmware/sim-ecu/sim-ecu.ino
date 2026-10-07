@@ -1,21 +1,23 @@
 /**
  * @file sim-ecu.ino
- * @brief Simulated ECU, phase F0: answer the gateway's request so the bench proves both
- *        directions of the bus.
+ * @brief Simulated engine ECU: answers OBD-II Mode 01 requests from a vehicle model.
  *
  * Hardware: Arduino Uno with an MCP2515 breakout (TJA1050 transceiver) on SPI.
  * Wiring (architecture.md §3): D10 CS, D11 SI, D12 SO, D13 SCK, D2 INT, 5V, GND.
  *
- * This increment answers one identifier with one fixed frame. It is deliberately not an
- * OBD-II implementation: services, DTCs, UDS sessions and fault injection are phase F1 and
- * later. The identifiers used here are the real diagnostic ones, so the wiring proven now
- * stays valid when a protocol is layered on top.
+ * The sketch only moves frames between the MCP2515 and two framework-free pieces that test
+ * on a development machine: the vehicle model (vehicle_model.cpp) and the Mode 01 responder
+ * (obd_responder.cpp). Requests arrive on 0x7DF or 0x7E0, answers leave on 0x7E8. DTCs, UDS
+ * sessions and fault injection are later increments.
  *
  * SAFETY: this device is a bench simulator. Nothing here may ever be pointed at a real
  * vehicle, and no write-capable service exists in this file.
  */
 #include <ACAN2515.h>
 #include <SPI.h>
+
+#include "obd_responder.h"
+#include "vehicle_model.h"
 
 // ---------------------------------------------------------------------------------------
 // CHECK THIS FIRST. MCP2515 breakout boards ship with either an 8 MHz or a 16 MHz crystal.
@@ -29,15 +31,13 @@ static const uint32_t BUS_BITRATE = 500UL * 1000UL;  // 500 kbps, the diagnostic
 static const byte MCP2515_CS_PIN = 10;
 static const byte MCP2515_INT_PIN = 2;
 
-// Bench identifiers, matching firmware/gateway/main/main.c.
-static const uint32_t BENCH_REQUEST_ID = 0x7DF;   // Functional request, tester to all ECUs.
-static const uint32_t BENCH_RESPONSE_ID = 0x7E8;  // Physical response, first ECU to tester.
-
 static ACAN2515 can(MCP2515_CS_PIN, SPI, MCP2515_INT_PIN);
+static VehicleModel model;
 
 static uint32_t framesReceived = 0;
 static uint32_t framesAnswered = 0;
 static uint32_t lastReportMs = 0;
+static uint32_t lastModelMs = 0;
 
 static void printFrame(const char *direction, const CANMessage &frame) {
   Serial.print(direction);
@@ -75,8 +75,7 @@ void setup() {
   const uint16_t errorCode = can.begin(settings, [] { can.isr(); });
 
   if (errorCode == 0) {
-    Serial.print(F("MCP2515 ready, listening for 0x"));
-    Serial.println(BENCH_REQUEST_ID, HEX);
+    Serial.println(F("MCP2515 ready, answering Mode 01 on 0x7DF and 0x7E0 from 0x7E8"));
   } else {
     Serial.print(F("MCP2515 did NOT start, error 0x"));
     Serial.println(errorCode, HEX);
@@ -85,42 +84,50 @@ void setup() {
 }
 
 void loop() {
+  const uint32_t now = millis();
+  model.advance(now - lastModelMs);
+  lastModelMs = now;
+
   CANMessage request;
   if (can.receive(request)) {
     framesReceived++;
-    printFrame("RX", request);
 
-    if (request.id == BENCH_REQUEST_ID) {
+    obd_sim::Frame answer;
+    if (!request.ext && obd_sim::respond(model.state(), request.id, request.data, request.len, &answer)) {
       CANMessage response;
-      response.id = BENCH_RESPONSE_ID;
+      response.id = answer.id;
       response.ext = false;
-      response.len = 8;
-      // Shaped like a Mode 01 positive response for engine speed, padded as the standard
-      // does. At F0 it carries no protocol meaning; F1 replaces this with a real decoder.
-      response.data[0] = 0x04;
-      response.data[1] = 0x41;
-      response.data[2] = 0x0C;
-      response.data[3] = 0x1A;
-      response.data[4] = 0xF8;
-      response.data[5] = 0x55;
-      response.data[6] = 0x55;
-      response.data[7] = 0x55;
-
+      response.len = answer.dlc;
+      for (uint8_t i = 0; i < answer.dlc; i++) {
+        response.data[i] = answer.data[i];
+      }
+      // Answer first, log afterwards: the console must never delay the bus.
       if (can.tryToSend(response)) {
         framesAnswered++;
+        printFrame("RX", request);
         printFrame("TX", response);
       } else {
         Serial.println(F("TX queue full, answer dropped"));
       }
+    } else {
+      printFrame("RX", request);
     }
   }
 
-  const uint32_t now = millis();
   if (now - lastReportMs >= 5000UL) {
     lastReportMs = now;
+    const VehicleState &s = model.state();
     Serial.print(F("received "));
     Serial.print(framesReceived);
     Serial.print(F(", answered "));
-    Serial.println(framesAnswered);
+    Serial.print(framesAnswered);
+    Serial.print(F(" | rpm "));
+    Serial.print(s.engine_rpm, 0);
+    Serial.print(F(" km/h "));
+    Serial.print(s.speed_kmh, 1);
+    Serial.print(F(" gear "));
+    Serial.print(s.gear);
+    Serial.print(F(" coolant "));
+    Serial.println(s.coolant_c, 1);
   }
 }
