@@ -1,0 +1,12 @@
+# Opt-in override for the bench demo with the real ESP32 gateway: publishes the MQTT broker on
+# every interface, so the gateway can reach it over WiFi. Everything else stays on localhost.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.lan.yml up -d mosquitto
+#
+# The broker is anonymous and unencrypted (ADR-0003): use this only on a trusted network, for
+# the duration of the demo, and drop the override afterwards.
+
+services:
+  mosquitto:
+    ports: !override
+      - "1883:1883"
