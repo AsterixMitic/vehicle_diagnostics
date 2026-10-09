@@ -55,4 +55,55 @@ menu "Vehicle diagnostics gateway"
             Counted from the start of polling. Well below the 96 errors at which a CAN
             controller turns error passive.
 
+    menu "Publishing to the backend"
+
+        config GATEWAY_WIFI_SSID
+            string "WiFi SSID (empty: do not publish)"
+            default ""
+            help
+                With an empty SSID the gateway only prints readings, as before. Credentials live
+                in the git-ignored sdkconfig; never put them in sdkconfig.defaults.
+
+        config GATEWAY_WIFI_PASSWORD
+            string "WiFi password"
+            default ""
+
+        config GATEWAY_MQTT_URI
+            string "MQTT broker URI"
+            default "mqtt://192.168.1.10:1883"
+            help
+                The Mosquitto of the edge server, usually the laptop running Docker Compose, on
+                the same WiFi network.
+
+        config GATEWAY_DEVICE_ID
+            string "Device id"
+            default "gateway-01"
+            help
+                Printable ASCII, at most 64 characters, without '/', '+', '#' or '"'.
+
+        config GATEWAY_VEHICLE_ID
+            string "Vehicle id"
+            default "bench-01"
+            help
+                Same rules as the device id.
+
+        config GATEWAY_SNTP_SERVER
+            string "SNTP server"
+            default "pool.ntp.org"
+
+        choice GATEWAY_DEFAULT_MODE
+            prompt "Processing mode at start-up"
+            default GATEWAY_DEFAULT_MODE_P2
+            help
+                Only the start value: a command on veh/{v}/dev/{d}/cmd/req switches the mode at
+                runtime without a reflash.
+
+            config GATEWAY_DEFAULT_MODE_P2
+                bool "P2: decode on the gateway, publish readings"
+            config GATEWAY_DEFAULT_MODE_P0
+                bool "P0: publish raw answer frames, the backend decodes"
+        endchoice
+
+    endmenu
+
 endmenu

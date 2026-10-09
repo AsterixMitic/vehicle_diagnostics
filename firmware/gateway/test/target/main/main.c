@@ -16,6 +16,7 @@
 #include "test_isotp.h"
 #include "test_obd.h"
 #include "test_obd_sched.h"
+#include "test_envelope.h"
 
 void app_main(void)
 {
@@ -26,6 +27,7 @@ void app_main(void)
     failures += isotp_tests_run();
     failures += obd_tests_run();
     failures += obd_sched_tests_run();
+    failures += envelope_tests_run();
 
     if (failures == 0) {
         printf("RESULT: PASS\n");

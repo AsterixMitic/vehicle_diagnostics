@@ -6,7 +6,9 @@
  *  - listen-only, the safe first contact with a vehicle: nothing is transmitted or
  *    acknowledged, and every 5 s the console shows which identifiers were seen;
  *  - polling: the scheduler discovers the supported PIDs and asks for them in cycles, and
- *    every reading is printed as one parseable line.
+ *    every reading is printed as one parseable line. With a WiFi SSID configured, each cycle
+ *    is also published to the backend as one envelope: decoded readings in mode P2, the raw
+ *    answer frames in mode P0. A command on the device's cmd/req topic switches the mode.
  *
  * On a vehicle target, bus errors above the threshold or a bus-off stop all requests for
  * good: the link is restarted in listen-only mode until the device is reset.
@@ -18,9 +20,11 @@
 #include <stdio.h>
 
 #include "can_link.h"
+#include "envelope.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "net.h"
 #include "obd.h"
 #include "obd_guard.h"
 #include "obd_sched.h"
@@ -62,6 +66,15 @@ static const char *TAG = "gateway";
 #else
 #define GATEWAY_REQUEST_ID OBD_ENGINE_REQUEST_ID
 #endif
+
+#if CONFIG_GATEWAY_DEFAULT_MODE_P0
+#define GATEWAY_DEFAULT_MODE ENVELOPE_MODE_P0
+#else
+#define GATEWAY_DEFAULT_MODE ENVELOPE_MODE_P2
+#endif
+
+#define TOPIC_PREFIX "veh/" CONFIG_GATEWAY_VEHICLE_ID "/dev/" CONFIG_GATEWAY_DEVICE_ID "/"
+#define ENVELOPE_CAPACITY 2048u  /* 14 raw frames with the header take about 1.2 kB */
 
 static const char *const STATE_NAME[] = {"stopped", "running", "bus-off", "recovering"};
 
@@ -156,6 +169,103 @@ static bool start_link(bool listen_only)
 
 static uint32_t s_tx_failed;
 
+/* ---------------------------------------------------------------------------------------- */
+/* Publishing: one poll cycle becomes one envelope                                           */
+/* ---------------------------------------------------------------------------------------- */
+
+typedef struct {
+    obd_reading_t readings[OBD_PID_COUNT];
+    hal_can_frame_t frames[OBD_PID_COUNT];  /* the answer frame behind each reading, as received */
+    size_t count;
+    int64_t first_unix_us;                  /* wall-clock time of the cycle's first answer */
+} cycle_t;
+
+typedef struct {
+    uint32_t offline;    /* cycle ended while the broker was unreachable */
+    uint32_t unsynced;   /* cycle ended before SNTP set the clock */
+    uint32_t overflow;   /* envelope did not fit the buffer; cannot happen with 14 PIDs */
+    uint32_t refused;    /* the MQTT client did not take it */
+} publish_drops_t;
+
+static bool s_publishing;
+static envelope_mode_t s_mode = GATEWAY_DEFAULT_MODE;
+static cycle_t s_cycle;
+static publish_drops_t s_drops;
+static char s_envelope[ENVELOPE_CAPACITY];
+
+static void collect(const obd_sched_outcome_t *out, const hal_can_frame_t *frame, uint64_t received_us)
+{
+    if (!s_publishing || frame == NULL || s_cycle.count >= OBD_PID_COUNT) {
+        return;
+    }
+    if (s_cycle.count == 0u) {
+        /* The frame's own receive time, moved onto the wall clock. */
+        s_cycle.first_unix_us = net_unix_now_us() - (int64_t)(hal_can_now_us() - received_us);
+    }
+    s_cycle.readings[s_cycle.count] = out->reading;
+    s_cycle.frames[s_cycle.count] = *frame;
+    s_cycle.count++;
+}
+
+static void publish_cycle(void)
+{
+    if (!net_connected()) {
+        s_drops.offline++;
+    } else if (!net_time_synced()) {
+        s_drops.unsynced++;
+    } else {
+        uint8_t trace_id[16];
+        uint8_t span_id[8];
+        net_random(trace_id, sizeof(trace_id));
+        net_random(span_id, sizeof(span_id));
+        char traceparent[ENVELOPE_TRACEPARENT_LEN];
+        envelope_traceparent(traceparent, trace_id, span_id);
+        const envelope_header_t header = {CONFIG_GATEWAY_DEVICE_ID, CONFIG_GATEWAY_VEHICLE_ID, net_next_sequence(),
+                                          s_cycle.first_unix_us, traceparent, s_mode};
+        const int len = envelope_write(s_envelope, sizeof(s_envelope), &header, s_cycle.readings, s_cycle.count,
+                                       s_cycle.frames, s_cycle.count);
+        if (len < 0) {
+            s_drops.overflow++;
+        } else {
+            char topic[128];
+            snprintf(topic, sizeof(topic), TOPIC_PREFIX "%s", envelope_topic_suffix(s_mode));
+            if (!net_publish(topic, s_envelope, (size_t)len)) {
+                s_drops.refused++;
+            }
+        }
+    }
+    s_cycle.count = 0u;
+}
+
+static void apply_mode_command(void)
+{
+    const net_mode_request_t request = net_take_mode_request();
+    if (request == NET_MODE_REQUEST_NONE) {
+        return;
+    }
+    const envelope_mode_t mode = request == NET_MODE_REQUEST_P0 ? ENVELOPE_MODE_P0 : ENVELOPE_MODE_P2;
+    if (mode != s_mode) {
+        ESP_LOGI(TAG, "processing mode %s -> %s by command", envelope_mode_name(s_mode), envelope_mode_name(mode));
+        s_mode = mode;
+    }
+}
+
+static void print_publish_counters(void)
+{
+    if (!s_publishing) {
+        return;
+    }
+    net_stats_t n;
+    net_get_stats(&n);
+    ESP_LOGI(TAG,
+             "publish | mode=%s connected=%s clock=%s handed_over=%" PRIu32 " acked=%" PRIu32 " offline=%" PRIu32
+             " unsynced=%" PRIu32 " refused=%" PRIu32 " overflow=%" PRIu32 " wifi_drops=%" PRIu32
+             " mqtt_connects=%" PRIu32 " commands=%" PRIu32 " ignored_commands=%" PRIu32,
+             envelope_mode_name(s_mode), net_connected() ? "yes" : "no", net_time_synced() ? "set" : "unset",
+             n.handed_over, n.acknowledged, s_drops.offline, s_drops.unsynced, s_drops.refused, s_drops.overflow,
+             n.wifi_disconnects, n.mqtt_connects, n.commands, n.commands_ignored);
+}
+
 static void print_reading(const obd_sched_outcome_t *out, uint64_t received_us)
 {
     printf("OBD,%" PRIu64 ",0x%02X,%s,%.2f,%s,0x%03" PRIX32 "\n", received_us / 1000u, out->reading.pid,
@@ -173,11 +283,13 @@ static void print_discovery(const obd_sched_t *sched)
     ESP_LOGI(TAG, "discovered %u supported PIDs:%s", (unsigned)sched->poll_count, list);
 }
 
-static void handle(obd_sched_t *sched, const obd_sched_outcome_t *out, uint64_t received_us)
+static void handle(obd_sched_t *sched, const obd_sched_outcome_t *out, const hal_can_frame_t *frame,
+                   uint64_t received_us)
 {
     switch (out->event) {
     case OBD_EVENT_READING:
         print_reading(out, received_us);
+        collect(out, frame, received_us);
         break;
     case OBD_EVENT_DISCOVERED:
         print_discovery(sched);
@@ -236,12 +348,20 @@ static void poll_forever(void)
         hal_can_frame_t frame;
         while (can_link_receive(&frame)) {
             obd_sched_on_frame(&sched, &frame, hal_can_now_us(), &out);
-            handle(&sched, &out, frame.timestamp_us);
+            handle(&sched, &out, &frame, frame.timestamp_us);
         }
 
         const uint64_t now = hal_can_now_us();
         obd_sched_on_tick(&sched, now, &out);
-        handle(&sched, &out, now);
+        handle(&sched, &out, NULL, now);
+
+        if (s_publishing) {
+            apply_mode_command();
+            /* The cycle is over once the scheduler waits for the next one. */
+            if (sched.state == OBD_SCHED_CYCLE_WAIT && s_cycle.count > 0u) {
+                publish_cycle();
+            }
+        }
 
         can_link_get_stats(&stats);
         const uint32_t errors = stats.bus_errors - errors_at_start;
@@ -261,6 +381,7 @@ static void poll_forever(void)
         if (now >= next_report) {
             next_report = now + STATS_PERIOD_US;
             print_counters(&sched, errors);
+            print_publish_counters();
         }
         vTaskDelay(pdMS_TO_TICKS(LOOP_PERIOD_MS));
     }
@@ -280,5 +401,12 @@ void app_main(void)
         ESP_LOGW(TAG, "listen-only: nothing is transmitted or acknowledged on this bus");
         listen_forever("");
     }
+
+    /* After the link: the network starts asynchronously and never delays the CAN side. */
+    const net_config_t net = {CONFIG_GATEWAY_WIFI_SSID, CONFIG_GATEWAY_WIFI_PASSWORD, CONFIG_GATEWAY_MQTT_URI,
+                              CONFIG_GATEWAY_DEVICE_ID, CONFIG_GATEWAY_SNTP_SERVER, TOPIC_PREFIX "cmd/req"};
+    s_publishing = net_start(&net);
+    ESP_LOGI(TAG, "publishing %s, device=%s vehicle=%s mode=%s", s_publishing ? "on" : "off (no WiFi SSID)",
+             CONFIG_GATEWAY_DEVICE_ID, CONFIG_GATEWAY_VEHICLE_ID, envelope_mode_name(s_mode));
     poll_forever();
 }

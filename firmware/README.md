@@ -5,7 +5,8 @@ simulator. Conventions are in `CONVENTIONS.md`; the system design is in `../docs
 
 Current scope: the gateway reads OBD-II Mode 01 current data from an engine ECU, the bench
 simulator or a real vehicle, decodes it exactly as the backend does and prints every reading on
-the console. Publishing to the backend over WiFi and MQTT is the next increment.
+the console. With a WiFi SSID configured it also publishes every poll cycle to the backend over
+MQTT, as decoded readings (mode P2) or as the raw answer frames (mode P0), switchable at runtime.
 
 ## Layout
 
@@ -17,6 +18,8 @@ firmware/
 │   ├── components/can_link/      receive task, ring buffer, bus health
 │   ├── components/isotp/         ISO 15765-2 transport, no I/O
 │   ├── components/obd/           Mode 01 table, decoder, support bitmaps, scheduler, guard
+│   ├── components/envelope/      version-1 JSON envelope from one poll cycle, no I/O
+│   ├── components/net/           WiFi, SNTP, MQTT client, persisted message sequence
 │   ├── main/                     the application and its build settings (Kconfig.projbuild)
 │   └── test/
 │       ├── shared/               test sources, used by both test builds
@@ -101,6 +104,47 @@ idf.py -B build-bench -D SDKCONFIG=build-bench/sdkconfig \
 To poll a vehicle, open `idf.py -B build-vehicle -D SDKCONFIG=build-vehicle/sdkconfig menuconfig`
 and clear *Listen only* (and set the bit rate if the car is not on 500 kbps); keep the target on
 *Vehicle*, so the error guard stays armed.
+
+## Publishing to the backend
+
+Set the *Publishing to the backend* submenu in `menuconfig` (WiFi SSID and password, broker URI,
+device and vehicle id, start-up mode). The values land in the build directory's `sdkconfig`,
+which git ignores; never put credentials in `sdkconfig.defaults` or `sdkconfig.bench`. With an
+empty SSID nothing is published and the gateway behaves exactly as before.
+
+```bash
+idf.py -B build-bench -D SDKCONFIG=build-bench/sdkconfig menuconfig   # Vehicle diagnostics gateway → Publishing
+idf.py -B build-bench -D SDKCONFIG=build-bench/sdkconfig -p /dev/ttyUSB1 -b 115200 flash monitor
+```
+
+The broker of the Compose stack listens on localhost only. For the demo, publish it on the
+laptop's WiFi address with the opt-in override, and point the gateway at that address
+(`ip -4 addr show` gives it):
+
+```bash
+cd deploy/compose
+docker compose -f docker-compose.yml -f docker-compose.lan.yml up -d mosquitto
+```
+
+Every 5 s the console adds a `publish |` line: mode, connection, clock, messages handed over and
+acknowledged, and every drop by reason (`offline`, `unsynced` before SNTP sets the clock,
+`refused`). The dashboard shows the device under its id, live and in history.
+
+Switch the mode at runtime with a retained command, so it survives reconnects:
+
+```bash
+docker exec vehiclediagnostics-mosquitto-1 mosquitto_pub -r -q 1 \
+    -t veh/bench-01/dev/gateway-01/cmd/req -m '{"processingMode":"P0"}'
+```
+
+Without hardware, the software-in-the-loop bench prints the same envelopes and can feed them
+to the running stack:
+
+```bash
+make -C tools/sil
+tools/sil/build/sil 60 --envelopes P2 --realtime | docker exec -i vehiclediagnostics-mosquitto-1 \
+    mosquitto_pub -t veh/sil-car/dev/sil-01/tel/signals -q 1 -l
+```
 
 ## Wiring, bench topology A
 

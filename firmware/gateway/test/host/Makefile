@@ -24,6 +24,7 @@ INCLUDES := \
 	-I$(COMPONENTS)/can_link/include \
 	-I$(COMPONENTS)/isotp/include \
 	-I$(COMPONENTS)/obd/include \
+	-I$(COMPONENTS)/envelope/include \
 	-I$(SHARED)
 
 SOURCES := \
@@ -33,10 +34,12 @@ SOURCES := \
 	$(COMPONENTS)/obd/obd_support.c \
 	$(COMPONENTS)/obd/obd_sched.c \
 	$(COMPONENTS)/obd/obd_guard.c \
+	$(COMPONENTS)/envelope/envelope.c \
 	$(SHARED)/test_can_ring_buffer.c \
 	$(SHARED)/test_isotp.c \
 	$(SHARED)/test_obd.c \
 	$(SHARED)/test_obd_sched.c \
+	$(SHARED)/test_envelope.c \
 	fixture_host.c \
 	main.c
 
