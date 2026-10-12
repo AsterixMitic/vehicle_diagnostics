@@ -16,9 +16,10 @@ public enum SimulatedMode
 }
 
 /// <summary>
-/// One simulated gateway: a simple vehicle model (rpm follows throttle, speed follows rpm,
-/// coolant temperature rises asymptotically — the same shape the future sim-ECU produces),
-/// published with a monotonic sequence and a fresh W3C traceparent per message.
+/// One simulated gateway, published with a monotonic sequence and a fresh W3C traceparent per
+/// message. Its values come from a recorded drive (<see cref="DriveProfile"/>, one row per
+/// message, starting at <c>startRow</c>) or, without a profile, from a simple vehicle model
+/// (rpm follows throttle, speed follows rpm, coolant temperature rises asymptotically).
 /// </summary>
 /// <remarks>
 /// The drive-cycle state is encoded into OBD-II Mode 01 response bytes first, and both modes
@@ -34,7 +35,9 @@ public sealed class DeviceSimulator(
     double rateHz,
     SimulatedMode mode,
     string? heartbeatFile,
-    TimeSpan startOffset = default)
+    TimeSpan startOffset = default,
+    DriveProfile? profile = null,
+    long startRow = 0)
 {
     private const uint ObdResponseId = 0x7E8;
 
@@ -82,11 +85,20 @@ public sealed class DeviceSimulator(
                     while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
                     {
                         elapsedSeconds += interval.TotalSeconds;
-                        Advance(elapsedSeconds, interval.TotalSeconds);
+                        ObdMode01Encoding encoded;
+                        if (profile is null)
+                        {
+                            Advance(elapsedSeconds, interval.TotalSeconds);
+                            encoded = ObdMode01Encoding.From(_rpm, _speedKmH, _coolantTemp);
+                        }
+                        else
+                        {
+                            encoded = profile.Row(startRow + _sequence);
+                        }
 
                         MqttApplicationMessage message = new MqttApplicationMessageBuilder()
                             .WithTopic(topic)
-                            .WithPayload(BuildPayload())
+                            .WithPayload(BuildPayload(encoded))
                             .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
                             .Build();
                         await client.PublishAsync(message, cancellationToken).ConfigureAwait(false);
@@ -135,12 +147,11 @@ public sealed class DeviceSimulator(
         _coolantTemp += (90.0 - _coolantTemp) * Math.Min(1, dtSeconds * 0.01);
     }
 
-    private byte[] BuildPayload()
+    private byte[] BuildPayload(ObdMode01Encoding encoded)
     {
         long sequence = Interlocked.Increment(ref _sequence);
         DateTimeOffset now = DateTimeOffset.UtcNow;
         string traceParent = $"00-{ActivityTraceId.CreateRandom().ToHexString()}-{ActivitySpanId.CreateRandom().ToHexString()}-01";
-        ObdMode01Encoding encoded = ObdMode01Encoding.From(_rpm, _speedKmH, _coolantTemp);
 
         return mode == SimulatedMode.P0
             ? EnvelopeSerializer.Serialize(new MessageEnvelope<RawFramesPayload>
