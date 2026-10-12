@@ -39,10 +39,11 @@ static atomic_uint s_handed_over, s_acknowledged, s_outbox_refused, s_wifi_disco
 static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     (void)arg;
-    (void)data;
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        const wifi_event_sta_disconnected_t *event = (const wifi_event_sta_disconnected_t *)data;
+        ESP_LOGW(TAG, "WiFi down, reason %u, access point at %d dBm", (unsigned)event->reason, (int)event->rssi);
         atomic_fetch_add(&s_wifi_disconnects, 1u);
         esp_wifi_connect();  /* keep trying; the MQTT client reconnects on its own once IP is back */
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {

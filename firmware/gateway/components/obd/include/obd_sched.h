@@ -28,6 +28,13 @@ extern "C" {
 #define OBD_ENGINE_RESPONSE_ID 0x7E8u
 #define OBD_FUNCTIONAL_REQUEST_ID 0x7DFu
 
+/** ISO 15765-4 with 29-bit identifiers: functional request, and the base of the answers. */
+#define OBD_EXTENDED_FUNCTIONAL_REQUEST_ID 0x18DB33F1u
+#define OBD_EXTENDED_RESPONSE_BASE 0x18DAF100u  /* | the answering ECU's source address */
+
+/** A failed discovery is tried again this long after it failed. */
+#define OBD_DISCOVERY_RETRY_US 5000000u
+
 /** ISO 15765-4 P2 for CAN: an ECU answers within 50 ms. */
 #define OBD_RESPONSE_TIMEOUT_US 50000u
 
@@ -36,16 +43,18 @@ typedef enum {
     OBD_SCHED_DISCOVER_WAIT,     /**< Waiting for a support bitmap. */
     OBD_SCHED_CYCLE_WAIT,        /**< Polling: waiting for the next cycle to start. */
     OBD_SCHED_POLL_WAIT,         /**< Polling: waiting for the answer to one PID. */
-    OBD_SCHED_DISCOVERY_FAILED,  /**< The ECU declared nothing; nothing is ever requested. */
+    OBD_SCHED_DISCOVERY_FAILED,  /**< The ECU declared nothing; discovery starts over after the retry time. */
     OBD_SCHED_STOPPED,           /**< Stopped by the caller; nothing is ever requested. */
 } obd_sched_state_t;
 
 typedef struct {
     uint32_t request_id;         /**< OBD_ENGINE_REQUEST_ID, or OBD_FUNCTIONAL_REQUEST_ID. */
     uint32_t response_id;        /**< Answers are taken only from here; OBD_ENGINE_RESPONSE_ID. */
+    bool extended;               /**< Request and answer identifiers are 29-bit. */
     uint64_t period_us;          /**< From the start of one cycle to the start of the next. */
     uint64_t timeout_us;         /**< Wait for each answer; OBD_RESPONSE_TIMEOUT_US. */
     uint8_t discovery_attempts;  /**< Requests per support bitmap before giving up on it. */
+    uint64_t discovery_retry_us; /**< After a failed discovery, start over this much later; 0 = never. */
 } obd_sched_config_t;
 
 /** What a call produced besides, possibly, a frame to transmit. */
@@ -92,11 +101,12 @@ typedef struct {
     uint8_t poll_count;
     uint8_t poll_index;           /**< PID awaited in the current cycle. */
     uint64_t deadline_us;         /**< End of the current wait. */
+    uint64_t retry_at_us;         /**< When a failed discovery starts over. */
     uint64_t cycle_start_us;
     obd_sched_counters_t counters;
 } obd_sched_t;
 
-/** Defaults: physical addressing to the engine ECU, 1 s period, 50 ms timeout, 3 attempts. */
+/** Defaults: physical addressing to the engine ECU, 1 s period, 50 ms timeout, 3 attempts, retry after 5 s. */
 obd_sched_config_t obd_sched_default_config(void);
 
 void obd_sched_init(obd_sched_t *sched, const obd_sched_config_t *config);

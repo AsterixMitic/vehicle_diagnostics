@@ -65,10 +65,18 @@ typedef struct {
     hal_can_frame_t pending_frame;
 } trace_t;
 
+/* A test may move the fake ECU's answers to a 29-bit identifier. */
+static bool s_answers_extended;
+static uint32_t s_extended_answer_id;
+
 static hal_can_frame_t answer_frame(uint32_t id, uint8_t length, const uint8_t *payload)
 {
     hal_can_frame_t frame = {0};
     frame.id = id;
+    if (s_answers_extended) {
+        frame.id = s_extended_answer_id;
+        frame.extended = true;
+    }
     frame.dlc = 8u;
     frame.data[0] = length;
     for (uint8_t i = 0; i < 7u; i++) {
@@ -244,9 +252,37 @@ static void test_failed_discovery_requests_nothing(void)
     run(&s_sched, &s_trace, &ecu, 0u, 2000000u, 1000u);
 
     CHECK(requests_for(&s_trace, 0x00u) == 3, "PID 0x00 is asked the configured three times");
-    CHECK(s_trace.sent_count == 3, "nothing else is ever requested");
+    CHECK(s_trace.sent_count == 3, "nothing else is requested before the retry time");
     CHECK(events_of(&s_trace, OBD_EVENT_DISCOVERY_FAILED) == 1, "the failure is reported once");
     CHECK(s_sched.state == OBD_SCHED_DISCOVERY_FAILED, "the scheduler stays failed");
+}
+
+static void test_failed_discovery_is_tried_again(void)
+{
+    /* The gateway was switched on before the ECU: silent at first, answering later. */
+    const uint8_t pids[] = {0x0Cu, 0x0Du};
+    fake_ecu_t ecu = ecu_with(pids, 2);
+    ecu.silent_range[0] = true;
+    begin(&s_sched, &s_trace, NULL);
+    run(&s_sched, &s_trace, &ecu, 0u, OBD_DISCOVERY_RETRY_US + 1000000u, 1000u);
+    CHECK(events_of(&s_trace, OBD_EVENT_DISCOVERY_FAILED) == 2 && requests_for(&s_trace, 0x00u) == 6,
+          "a silent ECU is asked again after the retry time, three requests per attempt");
+    CHECK(events_of(&s_trace, OBD_EVENT_READING) == 0, "and nothing is polled meanwhile");
+
+    ecu.silent_range[0] = false;
+    run(&s_sched, &s_trace, &ecu, OBD_DISCOVERY_RETRY_US + 1001000u, 3u * OBD_DISCOVERY_RETRY_US, 1000u);
+    CHECK(events_of(&s_trace, OBD_EVENT_DISCOVERED) == 1, "once the ECU answers, discovery completes");
+    CHECK(obd_sched_polls(&s_sched, 0x0Cu) && obd_sched_polls(&s_sched, 0x0Du) && s_sched.poll_count == 2u,
+          "and exactly the declared parameters are polled");
+    CHECK(events_of(&s_trace, OBD_EVENT_READING) > 2, "readings arrive");
+    CHECK(!s_trace.non_mode01, "every transmitted frame is a Mode 01 request");
+
+    obd_sched_config_t config = obd_sched_default_config();
+    config.discovery_retry_us = 0u;
+    ecu.silent_range[0] = true;
+    begin(&s_sched, &s_trace, &config);
+    run(&s_sched, &s_trace, &ecu, 0u, 3u * OBD_DISCOVERY_RETRY_US, 1000u);
+    CHECK(s_trace.sent_count == 3, "with the retry time 0 a failed discovery is final");
 }
 
 static void test_silent_later_range_keeps_the_earlier_ones(void)
@@ -374,6 +410,31 @@ static void test_functional_addressing(void)
     CHECK(!s_trace.non_mode01, "every transmitted frame is a Mode 01 request");
 }
 
+static void test_extended_addressing(void)
+{
+    const uint8_t pids[] = {0x0Cu};
+    const fake_ecu_t ecu = ecu_with(pids, 1);
+    obd_sched_config_t config = obd_sched_default_config();
+    config.extended = true;
+    config.request_id = OBD_EXTENDED_FUNCTIONAL_REQUEST_ID;
+    config.response_id = OBD_EXTENDED_RESPONSE_BASE | 0x10u;
+    s_answers_extended = true;
+    s_extended_answer_id = OBD_EXTENDED_RESPONSE_BASE | 0x10u;
+    begin(&s_sched, &s_trace, &config);
+    run(&s_sched, &s_trace, &ecu, 0u, 100000u, 1000u);
+    CHECK(s_trace.sent_count == 2 && s_trace.sent[1].frame.extended &&
+              s_trace.sent[1].frame.id == OBD_EXTENDED_FUNCTIONAL_REQUEST_ID,
+          "requests go to 0x18DB33F1 as 29-bit frames");
+    CHECK(events_of(&s_trace, OBD_EVENT_READING) == 1, "answers are taken from 0x18DAF110");
+
+    s_extended_answer_id = OBD_EXTENDED_RESPONSE_BASE | 0x18u;
+    begin(&s_sched, &s_trace, &config);
+    run(&s_sched, &s_trace, &ecu, 0u, 400000u, 1000u);
+    CHECK(events_of(&s_trace, OBD_EVENT_READING) == 0 && s_sched.state == OBD_SCHED_DISCOVERY_FAILED,
+          "an answer from another source address is not the engine ECU's");
+    s_answers_extended = false;
+}
+
 static void test_stop_silences_the_scheduler(void)
 {
     const uint8_t pids[] = {0x0Cu};
@@ -411,6 +472,7 @@ int obd_sched_tests_run(void)
     test_undeclared_range_is_not_queried();
     test_declared_ranges_are_followed();
     test_failed_discovery_requests_nothing();
+    test_failed_discovery_is_tried_again();
     test_silent_later_range_keeps_the_earlier_ones();
     test_cycle_visits_each_parameter_once_in_order();
     test_timeout_is_counted_and_skipped();
@@ -418,6 +480,7 @@ int obd_sched_tests_run(void)
     test_negative_response_is_counted();
     test_other_ecu_answers_are_ignored();
     test_functional_addressing();
+    test_extended_addressing();
     test_stop_silences_the_scheduler();
     test_guard();
 

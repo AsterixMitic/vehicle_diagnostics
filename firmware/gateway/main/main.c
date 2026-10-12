@@ -61,10 +61,18 @@ static const char *TAG = "gateway";
 #define GATEWAY_LISTEN_ONLY false
 #endif
 
-#if CONFIG_GATEWAY_FUNCTIONAL_ADDRESSING
+#if CONFIG_GATEWAY_EXTENDED_ADDRESSING
+#define GATEWAY_REQUEST_ID OBD_EXTENDED_FUNCTIONAL_REQUEST_ID
+#elif CONFIG_GATEWAY_FUNCTIONAL_ADDRESSING
 #define GATEWAY_REQUEST_ID OBD_FUNCTIONAL_REQUEST_ID
 #else
 #define GATEWAY_REQUEST_ID OBD_ENGINE_REQUEST_ID
+#endif
+
+#if CONFIG_GATEWAY_EXTENDED_ADDRESSING
+#define GATEWAY_EXTENDED true
+#else
+#define GATEWAY_EXTENDED false
 #endif
 
 #if CONFIG_GATEWAY_DEFAULT_MODE_P0
@@ -147,7 +155,7 @@ static bool start_link(bool listen_only)
     config.listen_only = listen_only;
     /* A vehicle bus-off is left alone; the guard reacts to it instead. */
     config.auto_recover = GATEWAY_TARGET == OBD_TARGET_BENCH;
-    if (listen_only) {
+    if (listen_only || GATEWAY_EXTENDED) {
         config.filter_mode = HAL_CAN_FILTER_ACCEPT_ALL;  /* see everything the port carries */
     } else {
         config.filter_mode = HAL_CAN_FILTER_MASK;
@@ -295,7 +303,8 @@ static void handle(obd_sched_t *sched, const obd_sched_outcome_t *out, const hal
         print_discovery(sched);
         break;
     case OBD_EVENT_DISCOVERY_FAILED:
-        ESP_LOGW(TAG, "discovery failed: the engine ECU answered no usable support bitmap");
+        ESP_LOGW(TAG, "discovery failed: the engine ECU answered no usable support bitmap; trying again in %u s",
+                 (unsigned)(OBD_DISCOVERY_RETRY_US / 1000000u));
         break;
     default:
         break;
@@ -335,6 +344,10 @@ static void poll_forever(void)
     static obd_sched_t sched;  /* static: no allocation, and kept off the small main stack */
     obd_sched_config_t config = obd_sched_default_config();
     config.request_id = GATEWAY_REQUEST_ID;
+#if CONFIG_GATEWAY_EXTENDED_ADDRESSING
+    config.extended = true;
+    config.response_id = OBD_EXTENDED_RESPONSE_BASE | CONFIG_GATEWAY_EXTENDED_ECU_ADDRESS;
+#endif
     config.period_us = (uint64_t)CONFIG_GATEWAY_POLL_PERIOD_MS * 1000u;
     obd_sched_init(&sched, &config);
 
@@ -390,7 +403,7 @@ static void poll_forever(void)
 void app_main(void)
 {
     ESP_LOGI(TAG, "vehicle diagnostics gateway, OBD-II Mode 01 client");
-    ESP_LOGI(TAG, "target=%s listen_only=%s bitrate=%u kbps requests_on=0x%03X period=%d ms guard=%d errors",
+    ESP_LOGI(TAG, "target=%s listen_only=%s bitrate=%u kbps requests_on=0x%X period=%d ms guard=%d errors",
              GATEWAY_TARGET_NAME, GATEWAY_LISTEN_ONLY ? "yes" : "no", (unsigned)GATEWAY_BITRATE_KBPS,
              (unsigned)GATEWAY_REQUEST_ID, CONFIG_GATEWAY_POLL_PERIOD_MS, CONFIG_GATEWAY_ERROR_GUARD_THRESHOLD);
 

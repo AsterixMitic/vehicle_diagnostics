@@ -18,6 +18,7 @@ obd_sched_config_t obd_sched_default_config(void)
         .period_us = 1000000u,
         .timeout_us = OBD_RESPONSE_TIMEOUT_US,
         .discovery_attempts = 3u,
+        .discovery_retry_us = OBD_DISCOVERY_RETRY_US,
     };
     return config;
 }
@@ -34,7 +35,7 @@ static void request(obd_sched_t *sched, uint8_t pid, uint64_t now_us, obd_sched_
 {
     out->send_frame = true;
     out->frame.id = sched->config.request_id;
-    out->frame.extended = false;
+    out->frame.extended = sched->config.extended;
     out->frame.dlc = 8u;
     out->frame.data[0] = 0x02u;  /* single frame, two bytes */
     out->frame.data[1] = OBD_SERVICE_CURRENT_DATA;
@@ -60,6 +61,18 @@ void obd_sched_init(obd_sched_t *sched, const obd_sched_config_t *config)
     obd_support_init(&sched->support);
     sched->range_pid = 0x00u;
     sched->state = OBD_SCHED_DISCOVER_SEND;
+}
+
+/**
+ * Nothing to poll: the ECU is silent (not powered yet, ignition off) or declares none of the
+ * table's PIDs. Start over later, so the order in which the two ends are switched on does not
+ * matter.
+ */
+static void fail_discovery(obd_sched_t *sched, uint64_t now_us, obd_sched_outcome_t *out)
+{
+    sched->state = OBD_SCHED_DISCOVERY_FAILED;
+    sched->retry_at_us = now_us + sched->config.discovery_retry_us;
+    out->event = OBD_EVENT_DISCOVERY_FAILED;
 }
 
 static void send_discovery(obd_sched_t *sched, uint64_t now_us, obd_sched_outcome_t *out)
@@ -90,8 +103,7 @@ static void finish_discovery(obd_sched_t *sched, uint64_t now_us, obd_sched_outc
     }
 
     if (sched->poll_count == 0u) {
-        sched->state = OBD_SCHED_DISCOVERY_FAILED;
-        out->event = OBD_EVENT_DISCOVERY_FAILED;
+        fail_discovery(sched, now_us, out);
         return;
     }
     out->event = OBD_EVENT_DISCOVERED;
@@ -132,8 +144,7 @@ void obd_sched_on_tick(obd_sched_t *sched, uint64_t now_us, obd_sched_outcome_t 
             send_discovery(sched, now_us, out);
         } else if (sched->range_pid == 0x00u) {
             /* Not even the first bitmap: the ECU declares nothing, so nothing is polled. */
-            sched->state = OBD_SCHED_DISCOVERY_FAILED;
-            out->event = OBD_EVENT_DISCOVERY_FAILED;
+            fail_discovery(sched, now_us, out);
         } else {
             /* A later range stays silent: poll what the earlier ranges declared. */
             finish_discovery(sched, now_us, out);
@@ -163,6 +174,15 @@ void obd_sched_on_tick(obd_sched_t *sched, uint64_t now_us, obd_sched_outcome_t 
     }
 
     case OBD_SCHED_DISCOVERY_FAILED:
+        if (sched->config.discovery_retry_us == 0u || now_us < sched->retry_at_us) {
+            break;
+        }
+        obd_support_init(&sched->support);
+        sched->range_pid = 0x00u;
+        sched->attempts = 0u;
+        send_discovery(sched, now_us, out);
+        break;
+
     case OBD_SCHED_STOPPED:
     default:
         break;
@@ -181,7 +201,7 @@ static void not_awaited(obd_sched_t *sched, const hal_can_frame_t *frame, obd_sc
         return;
     }
     out->pid = decoded.reading.pid;
-    if (frame->extended || frame->id != sched->config.response_id) {
+    if (frame->extended != sched->config.extended || frame->id != sched->config.response_id) {
         sched->counters.other_ecu++;
         out->event = OBD_EVENT_OTHER_ECU;
     } else {
@@ -192,7 +212,7 @@ static void not_awaited(obd_sched_t *sched, const hal_can_frame_t *frame, obd_sc
 
 static bool from_engine(const obd_sched_t *sched, const hal_can_frame_t *frame)
 {
-    return !frame->extended && frame->id == sched->config.response_id;
+    return frame->extended == sched->config.extended && frame->id == sched->config.response_id;
 }
 
 /** A negative answer to the awaited request: 7F, the requested service, a response code. */
