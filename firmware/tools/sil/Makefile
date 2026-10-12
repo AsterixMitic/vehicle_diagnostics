@@ -1,4 +1,5 @@
-# Software-in-the-loop bench: gateway scheduler and decoder against the simulator's model.
+# Software-in-the-loop bench: gateway scheduler and decoder against the simulator's responder,
+# answering from the recorded drive (or the vehicle model with --model).
 #   make            build
 #   ./build/sil 300 > sil.log
 CC       ?= cc
@@ -11,7 +12,7 @@ SIM      := ../../sim-ecu
 INCLUDES := -I$(GW)/gw_hal/include -I$(GW)/obd/include -I$(GW)/envelope/include -I$(SIM)
 BUILD    := build
 C_SRC    := $(GW)/obd/obd_decode.c $(GW)/obd/obd_support.c $(GW)/obd/obd_sched.c $(GW)/envelope/envelope.c
-CXX_SRC  := $(SIM)/vehicle_model.cpp $(SIM)/obd_responder.cpp sil.cpp
+CXX_SRC  := $(SIM)/vehicle_model.cpp $(SIM)/obd_responder.cpp $(SIM)/drive_replay.cpp $(SIM)/drive_profile.cpp sil.cpp
 
 all: $(BUILD)/sil
 

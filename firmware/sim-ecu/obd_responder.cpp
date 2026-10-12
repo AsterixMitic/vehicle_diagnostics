@@ -62,13 +62,16 @@ bool model_value(const VehicleState &s, uint8_t pid, float *value)
     return true;
 }
 
-namespace {
+bool ModelSource::supports(uint8_t pid) const
+{
+    return obd_sim::supports(pid);
+}
 
 /** Encode @p pid's value into data bytes A (and B); returns the number of bytes. */
-uint8_t encode(const VehicleState &s, uint8_t pid, uint8_t *out)
+uint8_t ModelSource::encode(uint8_t pid, uint8_t *out) const
 {
     float v = 0.0f;
-    if (!model_value(s, pid, &v)) {
+    if (!model_value(state_, pid, &v)) {
         return 0u;
     }
     uint16_t raw;
@@ -100,15 +103,17 @@ uint8_t encode(const VehicleState &s, uint8_t pid, uint8_t *out)
     return 2u;
 }
 
+namespace {
+
 /** Bitmap for support PID @p range: bit 7 of A declares range+1, bit 0 of D range+0x20. */
-void bitmap(uint8_t range, uint8_t *out)
+void bitmap(const Source &source, uint8_t range, uint8_t *out)
 {
     for (uint8_t i = 0; i < 4u; i++) {
         out[i] = 0u;
     }
     for (uint8_t bit = 0; bit < 32u; bit++) {
         const uint8_t pid = (uint8_t)(range + 1u + bit);
-        if (supports(pid)) {
+        if (source.supports(pid)) {
             out[bit / 8u] = (uint8_t)(out[bit / 8u] | (0x80u >> (bit % 8u)));
         }
     }
@@ -117,6 +122,11 @@ void bitmap(uint8_t range, uint8_t *out)
 }  // namespace
 
 bool respond(const VehicleState &state, uint32_t id, const uint8_t *data, uint8_t dlc, Frame *response)
+{
+    return respond(ModelSource(state), id, data, dlc, response);
+}
+
+bool respond(const Source &source, uint32_t id, const uint8_t *data, uint8_t dlc, Frame *response)
 {
     if (data == 0 || response == 0 || dlc < 3u) {
         return false;
@@ -133,16 +143,16 @@ bool respond(const VehicleState &state, uint32_t id, const uint8_t *data, uint8_
     uint8_t value[4];
     uint8_t length;
     if (pid == 0x00u || pid == 0x20u || pid == 0x40u) {
-        if (pid != 0x00u && !supports(pid)) {
+        if (pid != 0x00u && !source.supports(pid)) {
             return false;
         }
-        bitmap(pid, value);
+        bitmap(source, pid, value);
         length = 4u;
     } else {
-        if (!supports(pid)) {
+        if (!source.supports(pid)) {
             return false;  /* silent, as a real ECU on a functional request */
         }
-        length = encode(state, pid, value);
+        length = source.encode(pid, value);
         if (length == 0u) {
             return false;
         }

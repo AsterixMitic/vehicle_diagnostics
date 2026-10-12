@@ -1,10 +1,13 @@
 /**
  * @file sil.cpp
  * @brief Software-in-the-loop bench: the gateway's scheduler and decoder against the
- *        simulator's vehicle model and Mode 01 responder, in simulated time.
+ *        simulator's Mode 01 responder, in simulated time.
  *
- * The same code that runs on the ESP32 (components/obd) and on the Uno (vehicle_model,
- * obd_responder) exchanges frames here without a bus. Output is the gateway's console
+ * The responder answers from the recorded drive the Uno replays (drive_replay), or with
+ * --model from the 180 s city-loop vehicle model (the Uno's default).
+ *
+ * The same code that runs on the ESP32 (components/obd) and on the Uno (drive_replay,
+ * vehicle_model, obd_responder) exchanges frames here without a bus. Output is the gateway's console
  * format, so experiments/runner/drive_charts.py draws it like a recorded drive.
  *
  *   make && ./build/sil 300 > sil.log     # five simulated minutes
@@ -24,6 +27,7 @@
 #include "envelope.h"
 
 #include "obd.h"
+#include "drive_replay.h"
 #include "obd_responder.h"
 #include "obd_sched.h"
 #include "vehicle_model.h"
@@ -115,6 +119,7 @@ struct Envelopes {
 
 int main(int argc, char **argv)
 {
+    bool use_model = false;
     const double seconds = argc > 1 ? atof(argv[1]) : 120.0;
     const uint64_t end_us = (uint64_t)(seconds * 1e6);
 
@@ -131,6 +136,8 @@ int main(int argc, char **argv)
             env.vehicle = argv[++i];
         } else if (strcmp(argv[i], "--sequence") == 0 && i + 1 < argc) {
             env.sequence = strtoull(argv[++i], NULL, 10);
+        } else if (strcmp(argv[i], "--model") == 0) {
+            use_model = true;
         }
     }
     srand((unsigned)wall_now_us());
@@ -143,8 +150,8 @@ int main(int argc, char **argv)
     Pending answer = {false, 0u, {}};
     uint64_t model_ms = 0u;
     if (!env.on) {
-        printf("I (0) gateway: software-in-the-loop bench, %.0f s simulated, ECU latency %u us\n", seconds,
-               (unsigned)ECU_LATENCY_US);
+        printf("I (0) gateway: software-in-the-loop bench, %.0f s simulated, ECU latency %u us, %s\n", seconds,
+               (unsigned)ECU_LATENCY_US, use_model ? "vehicle model" : "recorded drive");
     }
 
     for (uint64_t now = 0u; now <= end_us; now += STEP_US) {
@@ -177,7 +184,11 @@ int main(int argc, char **argv)
         /* The ECU sees the request on the bus and answers after its latency. */
         if (out.send_frame) {
             obd_sim::Frame reply;
-            if (obd_sim::respond(model.state(), out.frame.id, out.frame.data, out.frame.dlc, &reply)) {
+            const bool answered = use_model
+                ? obd_sim::respond(model.state(), out.frame.id, out.frame.data, out.frame.dlc, &reply)
+                : obd_sim::respond(obd_sim::ReplaySource((uint32_t)now_ms), out.frame.id, out.frame.data,
+                                   out.frame.dlc, &reply);
+            if (answered) {
                 answer = {true, now + ECU_LATENCY_US, to_can(reply, now + ECU_LATENCY_US)};
             }
         }

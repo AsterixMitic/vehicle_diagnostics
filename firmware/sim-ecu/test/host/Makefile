@@ -17,7 +17,8 @@ GATEWAY  := ../../../gateway/components
 INCLUDES := -I$(SIM) -I$(GATEWAY)/gw_hal/include -I$(GATEWAY)/obd/include
 BUILD    := build
 
-OBJECTS := $(BUILD)/vehicle_model.o $(BUILD)/obd_responder.o $(BUILD)/obd_decode.o $(BUILD)/obd_support.o
+OBJECTS := $(BUILD)/vehicle_model.o $(BUILD)/obd_responder.o $(BUILD)/drive_replay.o $(BUILD)/drive_profile.o \
+           $(BUILD)/obd_decode.o $(BUILD)/obd_support.o
 TARGET  := $(BUILD)/sim_tests
 
 .PHONY: all run clean
@@ -26,13 +27,15 @@ all: run
 $(BUILD):
 	mkdir -p $(BUILD)
 
+$(BUILD)/drive_replay.o: $(SIM)/drive_profile.h $(SIM)/obd_responder.h
+
 $(BUILD)/%.o: $(SIM)/%.cpp $(SIM)/%.h | $(BUILD)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 $(BUILD)/obd_%.o: $(GATEWAY)/obd/obd_%.c | $(BUILD)
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
-$(TARGET): $(OBJECTS) test_sim.cpp $(SIM)/vehicle_model.h $(SIM)/obd_responder.h
+$(TARGET): $(OBJECTS) test_sim.cpp $(SIM)/vehicle_model.h $(SIM)/obd_responder.h $(SIM)/drive_replay.h
 	$(CXX) $(CXXFLAGS) $(INCLUDES) test_sim.cpp $(OBJECTS) -o $@ -lm
 
 run: $(TARGET)

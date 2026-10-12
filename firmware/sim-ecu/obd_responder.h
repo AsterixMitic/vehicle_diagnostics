@@ -27,7 +27,34 @@ struct Frame {
     uint8_t data[8];
 };
 
-/** True for the PIDs the simulator answers, support PIDs 0x20 and 0x40 included. */
+/**
+ * Where the answers come from: the vehicle model (ModelSource) or a recorded drive
+ * (ReplaySource in drive_replay.h). The responder only frames what a source encodes.
+ */
+class Source {
+public:
+    /** True for the PIDs this source answers, the support PIDs 0x20, 0x40, ... included. */
+    virtual bool supports(uint8_t pid) const = 0;
+
+    /** The current data bytes of measured PID @p pid; returns their number, 0 for none. */
+    virtual uint8_t encode(uint8_t pid, uint8_t *out) const = 0;
+
+protected:
+    ~Source() {}
+};
+
+/** The vehicle model's values, encoded with the inverse SAE J1979 formulas. */
+class ModelSource : public Source {
+public:
+    explicit ModelSource(const VehicleState &state) : state_(state) {}
+    bool supports(uint8_t pid) const;
+    uint8_t encode(uint8_t pid, uint8_t *out) const;
+
+private:
+    const VehicleState &state_;
+};
+
+/** True for the PIDs the model answers, support PIDs 0x20 and 0x40 included. */
 bool supports(uint8_t pid);
 
 /**
@@ -37,9 +64,12 @@ bool supports(uint8_t pid);
 bool model_value(const VehicleState &state, uint8_t pid, float *value);
 
 /**
- * The answer to one received frame.
+ * The answer to one received frame, from @p source.
  * @return true and fills @p response when the frame is a Mode 01 request this ECU answers.
  */
+bool respond(const Source &source, uint32_t id, const uint8_t *data, uint8_t dlc, Frame *response);
+
+/** The answer from the vehicle model, as respond(ModelSource(state), ...). */
 bool respond(const VehicleState &state, uint32_t id, const uint8_t *data, uint8_t dlc, Frame *response);
 
 }  // namespace obd_sim
