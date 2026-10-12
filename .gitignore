@@ -5,16 +5,22 @@ artifacts/
 TestResults/
 *.binlog
 
-# IDE state
+# IDE and editor state
 .vs/
 .idea/
+.vscode/
+.obsidian/
 *.user
 *.suo
+*.swp
+.~lock.*#
 
 # Local tooling
 .dotnet/
 .node/
 .tools/
+.claude/
+openspec/
 *.lock.json
 
 # OS noise
@@ -35,6 +41,9 @@ firmware/**/build-*/
 firmware/**/sdkconfig
 firmware/**/sdkconfig.old
 firmware/**/managed_components/
+
+# Serial monitor logs of bench runs and drives
+firmware/**/*.log
 
 # Python bytecode
 __pycache__/
