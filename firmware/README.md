@@ -26,7 +26,9 @@ firmware/
 │       ├── host/                 runs on a development machine, needs only a C compiler
 │       └── target/               runs on an ESP32, real or emulated
 └── sim-ecu/                      Arduino Uno + MCP2515
-    ├── vehicle_model.*           drive cycle and dynamics, no Arduino dependency
+    ├── drive_profile.*           a recorded drive as Mode 01 bytes (generated, in flash)
+    ├── drive_replay.*            answers from that drive, second by second, looping
+    ├── vehicle_model.*           the default source: a 180 s city loop, fourteen PIDs that move together
     ├── obd_responder.*           Mode 01 answers and support bitmaps, no Arduino dependency
     └── test/host/                host tests, round trip through the gateway's decoder
 ```
@@ -70,7 +72,7 @@ idf.py -C gateway/test/target build
 idf.py -C gateway/test/target qemu         # unit tests on an emulated ESP32, no hardware
 
 make -C gateway/test/host                  # same tests on a development machine
-make -C sim-ecu/test/host                  # simulator model and responder, host only
+make -C sim-ecu/test/host                  # simulator replay, model and responder, host only
 
 arduino-cli compile --fqbn arduino:avr:uno sim-ecu
 ```
@@ -187,7 +189,7 @@ idf.py -B build-bench -D SDKCONFIG=build-bench/sdkconfig -p /dev/ttyUSB1 -b 1152
 ```
 
 The gateway first asks the simulator for its support bitmaps and logs
-`discovered 14 supported PIDs`, then polls them once a second. Every reading is one line, and the
+`discovered 10 supported PIDs`, then polls them once a second. Every reading is one line, and the
 counters follow every 5 s:
 
 ```
@@ -196,8 +198,44 @@ I (17312) gateway: stats | cycles=12 requests=171 answers=171 timeouts=0 negativ
 ```
 
 Record a run with `idf.py ... monitor | tee bench.log`. The simulator prints each request and
-answer, and every 5 s its model state (engine speed, road speed, gear, coolant). The values
-follow a 120 s drive cycle: idle, accelerate through the gears, cruise, brake.
+answer, and every 5 s the second of the drive it replays, with engine and road speed.
+
+### What the simulator answers
+
+By default the simulator behaves like a car in town, from a small model (`sim-ecu/vehicle_model.cpp`,
+no recording in flash, the sketch is at 45 %). A driver controller follows a 180 s loop of target
+speeds (pull away, 30, 50 and 60 km/h, two stops at lights, idle) and everything else follows
+from the pedal and the engine: gear and engine speed (idle 800 min⁻¹), throttle sensor 27 to
+73 %, load, manifold pressure (about 35 kPa at idle, 22 kPa when lifting off in gear, near
+atmospheric at full pedal), air flow from engine speed and load, fuel rate (cut on overrun),
+alternator voltage that sags under load, coolant warming from 38 °C towards 92 °C, intake air
+following the engine bay, and a tank that slowly empties. The constants are calibrated on the
+recorded Opel Corsa 2015 drive (`../experiments/results/20261009-vehicle-corsa`) but no recorded
+samples are stored. Engine speed and load carry a little slow noise from a fixed-seed generator, and
+the model advances in fixed 100 ms ticks, so a run is the same whatever the timing of `loop()`.
+The ECU declares and answers fourteen PIDs (the Corsa's twelve plus oil
+temperature and fuel rate), on 0x7DF and 0x7E0 from 0x7E8, 11-bit.
+
+`MIN_REQUEST_GAP_MS` in the sketch (0 = off) makes it ignore a request that arrives within that
+many milliseconds of its previous answer, which is what the recorded Fiat Grande Punto does; set
+it to bench a gateway's request spacing.
+
+`REPLAY_RECORDED_DRIVE = true` in `sim-ecu.ino` answers instead with the city drive recorded on
+the Mitsubishi ASX 2012 (`../experiments/results/20261007-vehicle-drive`): the ten PIDs that car
+answered, with the bytes its engine ECU sent in each second, 753 s in a loop (the part before the
+ignition was switched off). The bytes are generated from the drive's `readings.csv`, which also
+writes the profile the virtual device replays:
+
+```bash
+python3 ../experiments/runner/drive_profile.py ../experiments/results/20261007-vehicle-drive/readings.csv \
+    --name asx-2012 --vehicle "Mitsubishi ASX 2012, diesel, city drive of 2026-10-07" \
+    --out ../experiments/profiles/asx-2012.csv --simulator sim-ecu/drive_profile.cpp
+```
+
+The tool refuses a value whose bytes do not decode back to it, and the host tests check that the
+simulator's bytes equal the profile CSV. The profile takes about 10 KB of the Uno's flash (the
+sketch is then at 69 %). The SIL bench replays the recording by default; `--model` selects the
+vehicle model.
 
 If the gateway counts only timeouts, the simulator is not answering: check its console for
 `MCP2515 ready`, the crystal setting and the wiring. A bench build recovers from bus-off by
